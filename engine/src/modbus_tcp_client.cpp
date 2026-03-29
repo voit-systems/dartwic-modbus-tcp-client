@@ -1,0 +1,192 @@
+//
+// Created by kemptonburton on 11/16/2025.
+//
+
+#include "modbus_tcp_client.h"
+
+#include <cerrno>
+#include <cstring>
+#include <iostream>
+#include <modbus_tcp_client_module.h>
+#include <random>
+#include <sstream>
+#include <string>
+
+#ifdef _WIN32
+    #include <WinSock2.h>
+#else
+    #include <fcntl.h>
+    #include <sys/socket.h>
+    #include <unistd.h>
+#endif
+
+namespace {
+    constexpr int kProbeRegisterMin = 0;
+    constexpr int kProbeRegisterMax = 65535;
+
+    int getRandomProbeRegisterAddress() {
+        thread_local std::mt19937 generator{std::random_device{}()};
+        std::uniform_int_distribution<int> distribution(kProbeRegisterMin, kProbeRegisterMax);
+        return distribution(generator);
+    }
+
+    void publishModbusConnectionError(ModbusTCPClientModule* module,
+        const std::string& instance_name,
+        const std::string& error_message) {
+        if (module == nullptr || module->dartwic == nullptr) {
+            return;
+        }
+
+        const std::string title = "MODBUS TCP CLIENT CONNECTION ERROR [" + instance_name + "]";
+        const std::string tag = instance_name + "/info.connected.value";
+        const std::string description =
+            "THE MODBUS TCP CLIENT WAS UNABLE TO CONNECT TO THE MODBUS SERVER ON THE GIVEN IP AND PORT."
+            " \n[INSTANCE NAME: " + instance_name +
+            "]\n[MODBUS ERROR: " + error_message + "]";
+
+        module->dartwic->consoleError(
+            title,
+            description,
+            {tag},
+            "ENSURE THE CONFIGURED IP AND PORT IS CORRECT AND THE DEVICE IS REACHABLE.",
+            3
+        );
+    }
+}
+
+ModbusTCPClient::ModbusTCPClient(ModbusTCPClientModule* module,
+    std::string instance_name,
+    std::string server_ip,
+    int server_port,
+    uint32_t tv_sec,
+    uint32_t tv_usec)
+    : module_(module),
+      instance_name_(std::move(instance_name)),
+      server_ip_(std::move(server_ip)),
+      server_port_(server_port),
+      tv_sec_(tv_sec),
+      tv_usec_(tv_usec) {
+    setConnected(0.0);
+}
+
+ModbusTCPClient::~ModbusTCPClient() {
+    disconnect();
+}
+
+bool ModbusTCPClient::ensureConnected() {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    return connectUnlocked();
+}
+
+void ModbusTCPClient::maintainConnection() {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (!connectUnlocked()) {
+        return;
+    }
+
+    uint16_t probe_value = 0;
+    const int probe_address = getRandomProbeRegisterAddress();
+    const int rc = modbus_read_input_registers(ctx_, probe_address, 1, &probe_value);
+    if (rc == -1) {
+        handleDisconnectUnlocked("INPUT REGISTER PROBE FAILED AT " + std::to_string(probe_address) + ": " + modbus_strerror(errno));
+    }
+}
+
+void ModbusTCPClient::disconnect() {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    disconnectUnlocked();
+}
+
+std::optional<int16_t> ModbusTCPClient::readInputRegister(int address) {
+    if (!ensureConnected()) {
+        return std::nullopt;
+    }
+
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    uint16_t raw_value = 0;
+    const int rc = modbus_read_input_registers(ctx_, address, 1, &raw_value);
+    if (rc == -1) {
+        onError(modbus_strerror(errno));
+        return std::nullopt;
+    }
+
+    return static_cast<int16_t>(raw_value);
+}
+
+std::vector<std::optional<int16_t>> ModbusTCPClient::readInputRegisters(const std::vector<int>& addresses) {
+    std::vector<std::optional<int16_t>> values;
+    values.reserve(addresses.size());
+
+    for (const int address : addresses) {
+        values.push_back(readInputRegister(address));
+    }
+
+    return values;
+}
+
+const std::string& ModbusTCPClient::getInstanceName() const {
+    return instance_name_;
+}
+
+void ModbusTCPClient::onError(const char* error) {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    handleDisconnectUnlocked(error == nullptr ? "UNKNOWN ERROR" : error);
+}
+
+void ModbusTCPClient::setConnected(double connected_value) {
+    const bool next_connected = connected_value != 0.0;
+    if (has_published_connection_state_ && connected_ == next_connected) {
+        return;
+    }
+
+    connected_ = next_connected;
+    has_published_connection_state_ = true;
+    module_->dartwic->upsertChannelField(instance_name_, "info.connected", DARTWIC::API::ChannelField::VALUE, connected_value);
+}
+
+bool ModbusTCPClient::connectUnlocked() {
+    if (ctx_ != nullptr) {
+        return true;
+    }
+
+    ctx_ = modbus_new_tcp(server_ip_.c_str(), server_port_);
+    if (ctx_ == nullptr) {
+        std::cerr << "Unable to create Modbus TCP context." << std::endl;
+        publishModbusConnectionError(module_, instance_name_, "UNABLE TO CREATE MODBUS TCP CONTEXT");
+        setConnected(0.0);
+        return false;
+    }
+
+    if (modbus_connect(ctx_) == -1) {
+        publishModbusConnectionError(module_, instance_name_, modbus_strerror(errno));
+        modbus_free(ctx_);
+        ctx_ = nullptr;
+        setConnected(0.0);
+        return false;
+    }
+
+    modbus_set_response_timeout(ctx_, tv_sec_, tv_usec_);
+    setConnected(1.0);
+
+    std::ostringstream stream;
+    stream << "Connected to Modbus TCP server at " << server_ip_ << ":" << server_port_
+           << " instance name: " << instance_name_ << std::endl;
+    std::cout << stream.str() << std::endl;
+
+    return true;
+}
+
+void ModbusTCPClient::disconnectUnlocked() {
+    if (ctx_ != nullptr) {
+        modbus_close(ctx_);
+        modbus_free(ctx_);
+        ctx_ = nullptr;
+    }
+    setConnected(0.0);
+}
+
+void ModbusTCPClient::handleDisconnectUnlocked(const std::string& error_message) {
+    std::cerr << "Error: " << error_message << std::endl;
+    publishModbusConnectionError(module_, instance_name_, error_message);
+    disconnectUnlocked();
+}

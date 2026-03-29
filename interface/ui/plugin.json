@@ -1,0 +1,5 @@
+{
+  "name": "modbus_tcp_client",
+  "entry": "ui/index.js",
+  "apiVersion": 1
+}
