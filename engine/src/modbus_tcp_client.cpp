@@ -124,6 +124,21 @@ std::vector<std::optional<int16_t>> ModbusTCPClient::readInputRegisters(const st
     return values;
 }
 
+bool ModbusTCPClient::writeCoil(int address, bool value) {
+    if (!ensureConnected()) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    const int rc = modbus_write_bit(ctx_, address, value ? 1 : 0);
+    if (rc == -1) {
+        onError(modbus_strerror(errno));
+        return false;
+    }
+
+    return true;
+}
+
 const std::string& ModbusTCPClient::getInstanceName() const {
     return instance_name_;
 }

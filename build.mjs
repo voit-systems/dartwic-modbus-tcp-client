@@ -5,12 +5,15 @@ import esbuild from "esbuild";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const packageRoot = __dirname;
-const moduleName = "modbus_tcp_client";
-const runtimeEntryPath = path.resolve(packageRoot, "src", "runtime-entry.jsx");
-const manifestPath = path.resolve(packageRoot, "ui", "plugin.json");
-const releaseUiDir = path.resolve(packageRoot, "release", "ui");
-const repoRoot = path.resolve(packageRoot, "..", "..", "..", "..");
+const repoRoot = __dirname;
+const interfaceRoot = path.resolve(repoRoot, "interface");
+const packageInfoPath = path.resolve(repoRoot, "package-info.json");
+const runtimeEntryPath = path.resolve(interfaceRoot, "src", "runtime-entry.jsx");
+const manifestPath = path.resolve(interfaceRoot, "ui", "plugin.json");
+const packageInfo = JSON.parse(await readFile(packageInfoPath, "utf8"));
+const packageId = packageInfo.id;
+const moduleName = packageId;
+const releaseUiDir = path.resolve(repoRoot, "package", "interface-module", packageId);
 const devInstallUiDir = path.resolve(repoRoot, "interface", "modules", "registry", moduleName, "ui");
 const shouldInstallDev = process.argv.includes("--install-dev");
 

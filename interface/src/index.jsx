@@ -14,14 +14,20 @@ function normalizeMappings(argumentsPayload, convertChannelValuePathToChannelNam
         }));
 }
 
+function normalizeChannelValuePath(channelPath, convertChannelValuePathToChannelName) {
+    return typeof channelPath === "string"
+        ? convertChannelValuePathToChannelName(channelPath)
+        : "";
+}
+
 export const moduleUiPluginMeta = {
     moduleName: "modbus_tcp_client",
-    taskTypes: ["modbus.read_input_registers"]
+    taskTypes: ["modbus.read_input_registers", "modbus.write_coil"]
 };
 
 export function createModuleUiPlugin(host) {
     const React = host.React;
-    const { useEffect, useMemo, useRef, useState } = React;
+    const { useEffect, useRef, useState } = React;
     const {
         Button,
         Input,
@@ -43,10 +49,36 @@ export function createModuleUiPlugin(host) {
     } = host.helpers;
 
     function ModbusTaskSecondaryGui({ task }) {
-        const mappings = useMemo(
-            () => normalizeMappings(task.arguments, convertChannelValuePathToChannelName),
-            [task.arguments]
-        );
+        const mappings = normalizeMappings(task.arguments, convertChannelValuePathToChannelName);
+
+        if (task.task_type === "modbus.write_coil") {
+            const instanceName = task.arguments?.module_instance_name || "UNBOUND";
+            const coil = Number.isFinite(Number(task.arguments?.coil)) ? String(task.arguments.coil) : "UNSET";
+            const channel = normalizeChannelValuePath(
+                task.arguments?.channel,
+                convertChannelValuePathToChannelName
+            ) || "UNBOUND";
+
+            return (
+                <>
+                    <Separator />
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div className="min-w-0 rounded-md border bg-muted/40 px-3 py-2">
+                            <div className="text-muted-foreground">MODULE</div>
+                            <div className="truncate">{instanceName}</div>
+                        </div>
+                        <div className="min-w-0 rounded-md border bg-muted/40 px-3 py-2">
+                            <div className="text-muted-foreground">COIL</div>
+                            <div className="truncate">{coil}</div>
+                        </div>
+                        <div className="min-w-0 rounded-md border bg-muted/40 px-3 py-2">
+                            <div className="text-muted-foreground">CHANNEL</div>
+                            <div className="truncate">{channel}</div>
+                        </div>
+                    </div>
+                </>
+            );
+        }
         const instanceName = task.arguments?.module_instance_name || "UNBOUND";
         const previewMappings = mappings.slice(0, 3);
         const hiddenMappingCount = Math.max(mappings.length - previewMappings.length, 0);
@@ -91,6 +123,166 @@ export function createModuleUiPlugin(host) {
                         <div className="text-xs text-muted-foreground">No mappings configured.</div>
                     )}
                 </div>
+            </>
+        );
+    }
+
+    function ModbusWriteCoilTaskDetailGui({ task, operation, onSaved, onClose }) {
+        const [moduleInstances, setModuleInstances] = useState([]);
+        const [selectedInstance, setSelectedInstance] = useState(task.arguments?.module_instance_name || "");
+        const [coil, setCoil] = useState(
+            Number.isFinite(Number(task.arguments?.coil)) ? String(task.arguments.coil) : ""
+        );
+        const [channel, setChannel] = useState(
+            normalizeChannelValuePath(task.arguments?.channel, convertChannelValuePathToChannelName)
+        );
+        const [errorMessage, setErrorMessage] = useState("");
+        const [isSaving, setIsSaving] = useState(false);
+
+        useEffect(() => {
+            setSelectedInstance(task.arguments?.module_instance_name || "");
+            setCoil(Number.isFinite(Number(task.arguments?.coil)) ? String(task.arguments.coil) : "");
+            setChannel(normalizeChannelValuePath(task.arguments?.channel, convertChannelValuePathToChannelName));
+            setErrorMessage("");
+        }, [task]);
+
+        useEffect(() => {
+            let active = true;
+
+            async function loadModuleInstances() {
+                const result = await operation("dartwic/get-module-instances", {
+                    registry_name: moduleUiPluginMeta.moduleName
+                }, 15000);
+
+                if (!active) {
+                    return;
+                }
+
+                if (result?.error) {
+                    setModuleInstances([]);
+                    return;
+                }
+
+                setModuleInstances(result?.payload?.module_instances || []);
+            }
+
+            void loadModuleInstances();
+
+            return () => {
+                active = false;
+            };
+        }, [operation]);
+
+        async function saveTask() {
+            const cleanedCoil = Number(coil);
+            const cleanedChannel = channel.trim();
+
+            if (!selectedInstance) {
+                setErrorMessage("SELECT A MODBUS MODULE INSTANCE.");
+                return;
+            }
+
+            if (!Number.isFinite(cleanedCoil)) {
+                setErrorMessage("ENTER A VALID COIL ADDRESS.");
+                return;
+            }
+
+            if (!cleanedChannel) {
+                setErrorMessage("SELECT A DARTWIC CHANNEL.");
+                return;
+            }
+
+            setIsSaving(true);
+            setErrorMessage("");
+
+            try {
+                const result = await operation("dartwic/create-task", {
+                    portal_name: task.portal,
+                    task_name: task.name,
+                    task_type: task.task_type,
+                    arguments: {
+                        module_instance_name: selectedInstance,
+                        coil: cleanedCoil,
+                        channel: cleanedChannel
+                    }
+                }, 30000);
+
+                if (result?.error) {
+                    setErrorMessage((result?.payload?.error || "FAILED TO SAVE TASK.").toUpperCase());
+                    return;
+                }
+
+                if (onSaved) {
+                    await onSaved();
+                }
+
+                if (onClose) {
+                    onClose();
+                }
+            } finally {
+                setIsSaving(false);
+            }
+        }
+
+        return (
+            <>
+                <DialogHeader>
+                    <DialogTitle>MODBUS COIL WRITE TASK</DialogTitle>
+                    <DialogDescription>
+                        BIND THIS TASK TO A MODBUS MODULE INSTANCE AND WRITE A DARTWIC CHANNEL VALUE TO A COIL.
+                    </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                        <Label>MODULE INSTANCE</Label>
+                        <Select value={selectedInstance} onValueChange={setSelectedInstance}>
+                            <SelectTrigger className="w-full">
+                                <SelectValue placeholder="SELECT A MODBUS MODULE INSTANCE" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {moduleInstances.map((instance) => (
+                                    <SelectItem key={instance.name} value={instance.name}>
+                                        {instance.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="space-y-2">
+                        <Label>COIL ADDRESS</Label>
+                        <Input
+                            type="number"
+                            min="0"
+                            placeholder="COIL"
+                            value={coil}
+                            onChange={(event) => setCoil(event.target.value)}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>SOURCE CHANNEL</Label>
+                        <ChannelComboBox
+                            mode="read"
+                            showFieldSelector={false}
+                            initialValue={channel}
+                            placeholder="SELECT CHANNEL"
+                            onSelect={(value) => setChannel(convertChannelValuePathToChannelName(value))}
+                            className="min-w-0 w-full"
+                        />
+                    </div>
+                    {errorMessage ? (
+                        <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                            {errorMessage}
+                        </div>
+                    ) : null}
+                </div>
+                <DialogFooter>
+                    <Button variant="ghost" onClick={onClose} disabled={isSaving}>
+                        CANCEL
+                    </Button>
+                    <Button onClick={saveTask} disabled={isSaving}>
+                        {isSaving ? "SAVING" : "SAVE"}
+                    </Button>
+                </DialogFooter>
             </>
         );
     }
@@ -429,7 +621,11 @@ export function createModuleUiPlugin(host) {
         taskTypes: moduleUiPluginMeta.taskTypes,
         ModuleConfigPage: ModbusModuleConfigPage,
         TaskSecondaryGui: ModbusTaskSecondaryGui,
-        TaskDetailGui: ModbusTaskDetailGui
+        TaskDetailGui: (props) => (
+            props.task?.task_type === "modbus.write_coil"
+                ? <ModbusWriteCoilTaskDetailGui {...props} />
+                : <ModbusTaskDetailGui {...props} />
+        )
     };
 }
 

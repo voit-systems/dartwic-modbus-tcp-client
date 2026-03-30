@@ -9,21 +9,27 @@ if(MSVC)
     set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /DEBUG")
 endif()
 
+set(ENGINE_DIR "${PROJECT_SOURCE_DIR}/engine")
+set(PACKAGE_INFO_FILE "${PROJECT_SOURCE_DIR}/package-info.json")
+
+file(READ "${PACKAGE_INFO_FILE}" PACKAGE_INFO_JSON)
+string(JSON PACKAGE_ID GET "${PACKAGE_INFO_JSON}" id)
+set(ENGINE_PACKAGE_DIR "${PROJECT_SOURCE_DIR}/package/engine-module/${PACKAGE_ID}")
+
 ############### SOURCE FILES ###############
-file(GLOB_RECURSE SRC_SOURCES "${PROJECT_SOURCE_DIR}/src/*.cpp")
-file(GLOB_RECURSE SDK_SOURCES "${PROJECT_SOURCE_DIR}/sdk/*.cpp")
+file(GLOB_RECURSE SRC_SOURCES "${ENGINE_DIR}/src/*.cpp")
 
 ### CREATE MAIN LIBRARY ###
-add_library(modbus_tcp_client SHARED ${SRC_SOURCES} ${SDK_SOURCES})
+add_library(modbus_tcp_client SHARED ${SRC_SOURCES})
 
 ############### INCLUDE DIRECTORIES ###############
 file(GLOB subdirs
         CONFIGURE_DEPENDS
         LIST_DIRECTORIES true
-        "${PROJECT_SOURCE_DIR}/include/*")
+        "${ENGINE_DIR}/include/*")
 
 target_include_directories(modbus_tcp_client PRIVATE
-        "${PROJECT_SOURCE_DIR}/include"
+        "${ENGINE_DIR}/include"
         ${subdirs})
 
 ############### NON HEADER ONLY LIBRARY INCLUDES ###############
@@ -38,22 +44,20 @@ target_link_libraries(modbus_tcp_client PRIVATE
 )
 
 ############### OUTPUT DIRECTORIES ###############
-# Default to Release if not specified
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
 set_target_properties(modbus_tcp_client PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/release/${CMAKE_BUILD_TYPE}/bin"
+        RUNTIME_OUTPUT_DIRECTORY "${ENGINE_PACKAGE_DIR}/bin"
 )
 
 ############### COPY FILES ###############
-#module_config.yaml TO OUTPUT
-set(CONFIG_FILE "${CMAKE_SOURCE_DIR}/src/module_config.yaml")
+set(CONFIG_FILE "${ENGINE_DIR}/src/module_config.yaml")
 
 add_custom_command(TARGET modbus_tcp_client POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CONFIG_FILE}"
-        "${PROJECT_SOURCE_DIR}/release/${CMAKE_BUILD_TYPE}/module_config.yaml"
+        "${ENGINE_PACKAGE_DIR}/module_config.yaml"
         COMMENT "Copying module_config.yaml to output folder"
 )

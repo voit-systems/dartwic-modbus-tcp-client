@@ -1,0 +1,15 @@
+# Editor directories and files
+.idea/
+.vscode/
+
+# Node
+node_modules/
+
+# CMake files
+build/
+cmake-build-debug/
+cmake-build-release/
+
+# Release outputs
+release/
+package/

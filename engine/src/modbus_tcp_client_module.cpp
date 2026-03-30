@@ -11,8 +11,10 @@
 #include <vector>
 
 namespace {
-    constexpr const char* MODBUS_TASK_TYPE = "modbus.read_input_registers";
-    constexpr const char* MODBUS_RUNTIME_KEY = "modbus_input_register_context";
+    constexpr const char* MODBUS_READ_INPUT_REGISTERS_TASK_TYPE = "modbus.read_input_registers";
+    constexpr const char* MODBUS_WRITE_COIL_TASK_TYPE = "modbus.write_coil";
+    constexpr const char* MODBUS_READ_RUNTIME_KEY = "modbus_input_register_context";
+    constexpr const char* MODBUS_WRITE_RUNTIME_KEY = "modbus_write_coil_context";
     std::atomic<uint64_t> g_modbus_loop_instance_counter{0};
 
     struct Mapping {
@@ -100,6 +102,34 @@ namespace {
 
         return mappings;
     }
+
+    struct CoilWriteArguments {
+        int coil = 0;
+        std::string channel;
+    };
+
+    std::optional<CoilWriteArguments> parseCoilWriteArguments(const nlohmann::json& arguments) {
+        if (!arguments.is_object()) {
+            return std::nullopt;
+        }
+
+        if (!arguments.contains("coil") || !arguments["coil"].is_number_integer()) {
+            return std::nullopt;
+        }
+
+        if (!arguments.contains("channel") || !arguments["channel"].is_string()) {
+            return std::nullopt;
+        }
+
+        CoilWriteArguments parsed;
+        parsed.coil = arguments["coil"].get<int>();
+        parsed.channel = normalizeMappedChannelPath(arguments["channel"].get<std::string>());
+        if (parsed.channel.empty()) {
+            return std::nullopt;
+        }
+
+        return parsed;
+    }
 }
 
 #ifdef _WIN32
@@ -149,7 +179,7 @@ ModbusTCPClientModule::~ModbusTCPClientModule() {
 }
 
 void ModbusTCPClientModule::onRegistryLoaded() {
-    registerTaskType();
+    registerTaskTypes();
 }
 
 std::optional<int16_t> ModbusTCPClientModule::readInputRegister(int address) {
@@ -166,6 +196,14 @@ std::vector<std::optional<int16_t>> ModbusTCPClientModule::readInputRegisters(co
     return client_->readInputRegisters(addresses);
 }
 
+bool ModbusTCPClientModule::writeCoil(int address, bool value) {
+    if (!client_) {
+        return false;
+    }
+
+    return client_->writeCoil(address, value);
+}
+
 const std::string& ModbusTCPClientModule::getInstanceName() const {
     return instance_name_;
 }
@@ -178,7 +216,7 @@ std::string ModbusTCPClientModule::connectionLoopName() const {
     return connection_loop_name_;
 }
 
-void ModbusTCPClientModule::registerTaskType() {
+void ModbusTCPClientModule::registerTaskTypes() {
     const auto resolve_context = [this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) -> std::shared_ptr<CachedModbusTaskContext> {
         const auto& arguments = task_runtime.getArguments();
         if (!arguments.is_object()) {
@@ -203,22 +241,24 @@ void ModbusTCPClientModule::registerTaskType() {
         auto cached = std::make_shared<CachedModbusTaskContext>();
         cached->instance_name = instance_name;
         cached->module = module;
-        task_runtime.setTypedRuntimeContext(MODBUS_RUNTIME_KEY, cached);
         return cached;
     };
 
-    DARTWIC::API::TaskTypeDefinition task_type;
-    task_type.metadata.task_type = MODBUS_TASK_TYPE;
-    task_type.metadata.icon_url = "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg";
-    task_type.metadata.exposed_from = "modbus_tcp_client";
-    task_type.metadata.expected_module_registry = "modbus_tcp_client";
-    task_type.metadata.default_arguments = {
+    DARTWIC::API::TaskTypeDefinition read_task_type;
+    read_task_type.metadata.task_type = MODBUS_READ_INPUT_REGISTERS_TASK_TYPE;
+    read_task_type.metadata.icon_url = "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg";
+    read_task_type.metadata.exposed_from = "modbus_tcp_client";
+    read_task_type.metadata.expected_module_registry = "modbus_tcp_client";
+    read_task_type.metadata.default_arguments = {
         {"module_instance_name", ""},
         {"mappings", nlohmann::json::array()}
     };
 
-    task_type.on_start = [resolve_context, this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
-        resolve_context(definition, task_runtime);
+    read_task_type.on_start = [resolve_context, this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
+        const auto cached = resolve_context(definition, task_runtime);
+        if (cached) {
+            task_runtime.setTypedRuntimeContext(MODBUS_READ_RUNTIME_KEY, cached);
+        }
 
         const std::string task_controller = "task:" + task_runtime.getPortalName() + "/" + task_runtime.getTaskName();
         const auto mappings = parseMappings(task_runtime.getArguments());
@@ -249,19 +289,20 @@ void ModbusTCPClientModule::registerTaskType() {
         }
     };
 
-    task_type.on_task = [this, resolve_context](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
+    read_task_type.on_task = [this, resolve_context](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
         (void)elapsed_seconds;
-        auto cached = task_runtime.getTypedRuntimeContext<CachedModbusTaskContext>(MODBUS_RUNTIME_KEY);
+        auto cached = task_runtime.getTypedRuntimeContext<CachedModbusTaskContext>(MODBUS_READ_RUNTIME_KEY);
         if (!cached) {
             cached = resolve_context(definition, task_runtime);
             if (!cached) {
                 return;
             }
+            task_runtime.setTypedRuntimeContext(MODBUS_READ_RUNTIME_KEY, cached);
         }
 
         auto module = cached->module.lock();
         if (!module) {
-            task_runtime.removeRuntimeContext(MODBUS_RUNTIME_KEY);
+            task_runtime.removeRuntimeContext(MODBUS_READ_RUNTIME_KEY);
             return;
         }
 
@@ -286,7 +327,7 @@ void ModbusTCPClientModule::registerTaskType() {
         }
     };
 
-    task_type.on_end = [this](const DARTWIC::API::TaskTypeDefinition&, DARTWIC::API::TaskRuntime& task_runtime) {
+    read_task_type.on_end = [this](const DARTWIC::API::TaskTypeDefinition&, DARTWIC::API::TaskRuntime& task_runtime) {
         const auto mappings = parseMappings(task_runtime.getArguments());
         for (const auto& mapping : mappings) {
             const auto channel_path = splitChannelPath(mapping.channel);
@@ -314,14 +355,79 @@ void ModbusTCPClientModule::registerTaskType() {
             );
         }
 
-        task_runtime.removeRuntimeContext(MODBUS_RUNTIME_KEY);
+        task_runtime.removeRuntimeContext(MODBUS_READ_RUNTIME_KEY);
     };
 
-    task_type.cleanup = [](DARTWIC::API::TaskRuntime& task_runtime) {
-        task_runtime.removeRuntimeContext(MODBUS_RUNTIME_KEY);
+    read_task_type.cleanup = [](DARTWIC::API::TaskRuntime& task_runtime) {
+        task_runtime.removeRuntimeContext(MODBUS_READ_RUNTIME_KEY);
     };
 
-    dartwic->registerTaskType(task_type);
+    dartwic->registerTaskType(read_task_type);
+
+    DARTWIC::API::TaskTypeDefinition write_task_type;
+    write_task_type.metadata.task_type = MODBUS_WRITE_COIL_TASK_TYPE;
+    write_task_type.metadata.icon_url = "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg";
+    write_task_type.metadata.exposed_from = "modbus_tcp_client";
+    write_task_type.metadata.expected_module_registry = "modbus_tcp_client";
+    write_task_type.metadata.default_arguments = {
+        {"module_instance_name", ""},
+        {"coil", 0},
+        {"channel", ""}
+    };
+
+    write_task_type.on_start = [resolve_context](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
+        const auto cached = resolve_context(definition, task_runtime);
+        if (cached) {
+            task_runtime.setTypedRuntimeContext(MODBUS_WRITE_RUNTIME_KEY, cached);
+        }
+    };
+
+    write_task_type.on_task = [this, resolve_context](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
+        (void)elapsed_seconds;
+        auto cached = task_runtime.getTypedRuntimeContext<CachedModbusTaskContext>(MODBUS_WRITE_RUNTIME_KEY);
+        if (!cached) {
+            cached = resolve_context(definition, task_runtime);
+            if (!cached) {
+                return;
+            }
+            task_runtime.setTypedRuntimeContext(MODBUS_WRITE_RUNTIME_KEY, cached);
+        }
+
+        auto module = cached->module.lock();
+        if (!module) {
+            task_runtime.removeRuntimeContext(MODBUS_WRITE_RUNTIME_KEY);
+            return;
+        }
+
+        const auto coil_write = parseCoilWriteArguments(task_runtime.getArguments());
+        if (!coil_write.has_value()) {
+            return;
+        }
+
+        const auto channel_path = splitChannelPath(coil_write->channel);
+        if (!channel_path.has_value()) {
+            return;
+        }
+
+        const double channel_value = dartwic->queryChannelField(
+            channel_path->first,
+            channel_path->second,
+            DARTWIC::API::ChannelField::VALUE,
+            DARTWIC::API::ChannelValue{0.0}
+        );
+
+        module->writeCoil(coil_write->coil, channel_value != 0.0);
+    };
+
+    write_task_type.on_end = [](const DARTWIC::API::TaskTypeDefinition&, DARTWIC::API::TaskRuntime& task_runtime) {
+        task_runtime.removeRuntimeContext(MODBUS_WRITE_RUNTIME_KEY);
+    };
+
+    write_task_type.cleanup = [](DARTWIC::API::TaskRuntime& task_runtime) {
+        task_runtime.removeRuntimeContext(MODBUS_WRITE_RUNTIME_KEY);
+    };
+
+    dartwic->registerTaskType(write_task_type);
 }
 
 extern "C" EXPORT_API DARTWIC::Modules::BaseModule* createModule(YAML::Node cfg, DARTWIC::API::SDK_API* drtw) {

@@ -6,17 +6,17 @@ Author the module UI in:
 
 Build the runtime plugin with:
 
-- `npm install`
-- `npm run build`
+- `npm install` from the repository root
+- `npm run build` from the repository root
 
 That writes the drag-and-drop app files to:
 
-- `modules/modbus_tcp_client/interface/modbus_tcp_client/release/ui`
+- `package/interface-module/<package_id>`
 
 For local desktop-app development, you can also run:
 
-- `npm run install:dev`
+- `npm run install:dev` from the repository root
 
 That updates:
 
-- `interface/modules/registry/modbus_tcp_module/ui`
+- `interface/modules/registry/modbus_tcp_client/ui`

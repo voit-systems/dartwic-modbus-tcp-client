@@ -18,13 +18,14 @@ public:
 
     std::optional<int16_t> readInputRegister(int address);
     std::vector<std::optional<int16_t>> readInputRegisters(const std::vector<int>& addresses);
+    bool writeCoil(int address, bool value);
     const std::string& getInstanceName() const;
 
     ~ModbusTCPClientModule() override;
 
 private:
     bool isInstanceConfig() const;
-    void registerTaskType();
+    void registerTaskTypes();
     std::string connectionLoopName() const;
 
     std::string instance_name_;

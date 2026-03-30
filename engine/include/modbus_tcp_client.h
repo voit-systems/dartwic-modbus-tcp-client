@@ -29,6 +29,7 @@ public:
     void disconnect();
     std::optional<int16_t> readInputRegister(int address);
     std::vector<std::optional<int16_t>> readInputRegisters(const std::vector<int>& addresses);
+    bool writeCoil(int address, bool value);
 
     const std::string& getInstanceName() const;
 
