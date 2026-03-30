@@ -42,6 +42,31 @@ namespace {
             3
         );
     }
+
+    void publishModbusOperationError(ModbusTCPClientModule* module,
+        const std::string& instance_name,
+        const std::string& operation_name,
+        const std::string& error_message) {
+        if (module == nullptr || module->dartwic == nullptr) {
+            return;
+        }
+
+        const std::string title = "MODBUS TCP CLIENT TASK ERROR [" + instance_name + "]";
+        const std::string tag = instance_name + "/info.connected.value";
+        const std::string description =
+            "A MODBUS TASK OPERATION FAILED WHILE THE CLIENT WAS MARKED CONNECTED."
+            " \n[INSTANCE NAME: " + instance_name +
+            "]\n[OPERATION: " + operation_name +
+            "]\n[MODBUS ERROR: " + error_message + "]";
+
+        module->dartwic->consoleError(
+            title,
+            description,
+            {tag},
+            "CHECK THE REMOTE DEVICE STATE, REGISTER/COIL ADDRESS, AND CONNECTION HEALTH.",
+            3
+        );
+    }
 }
 
 ModbusTCPClient::ModbusTCPClient(ModbusTCPClientModule* module,
@@ -63,14 +88,18 @@ ModbusTCPClient::~ModbusTCPClient() {
     disconnect();
 }
 
-bool ModbusTCPClient::ensureConnected() {
-    std::lock_guard<std::mutex> lock(ctx_lock_);
-    return connectUnlocked();
-}
-
 void ModbusTCPClient::maintainConnection() {
     std::lock_guard<std::mutex> lock(ctx_lock_);
-    connectUnlocked();
+    if (ctx_ == nullptr) {
+        connectUnlocked();
+        return;
+    }
+
+    uint16_t probe_value = 0;
+    const int rc = modbus_read_input_registers(ctx_, 0, 1, &probe_value);
+    if (rc == -1) {
+        handleDisconnectUnlocked(modbus_strerror(errno));
+    }
 }
 
 void ModbusTCPClient::disconnect() {
@@ -78,16 +107,21 @@ void ModbusTCPClient::disconnect() {
     disconnectUnlocked();
 }
 
+bool ModbusTCPClient::isConnected() const {
+    return connected_.load();
+}
+
 std::optional<int16_t> ModbusTCPClient::readInputRegister(int address) {
-    if (!ensureConnected()) {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (ctx_ == nullptr || !connected_.load()) {
         return std::nullopt;
     }
 
-    std::lock_guard<std::mutex> lock(ctx_lock_);
     uint16_t raw_value = 0;
     const int rc = modbus_read_input_registers(ctx_, address, 1, &raw_value);
     if (rc == -1) {
-        handleDisconnectUnlocked(modbus_strerror(errno));
+        publishModbusOperationError(module_, instance_name_, "read_input_register", modbus_strerror(errno));
+        disconnectUnlocked();
         return std::nullopt;
     }
 
@@ -106,14 +140,15 @@ std::vector<std::optional<int16_t>> ModbusTCPClient::readInputRegisters(const st
 }
 
 bool ModbusTCPClient::writeCoil(int address, bool value) {
-    if (!ensureConnected()) {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (ctx_ == nullptr || !connected_.load()) {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(ctx_lock_);
     const int rc = modbus_write_bit(ctx_, address, value ? 1 : 0);
     if (rc == -1) {
-        handleDisconnectUnlocked(modbus_strerror(errno));
+        publishModbusOperationError(module_, instance_name_, "write_coil", modbus_strerror(errno));
+        disconnectUnlocked();
         return false;
     }
 
@@ -126,11 +161,12 @@ const std::string& ModbusTCPClient::getInstanceName() const {
 
 void ModbusTCPClient::setConnected(double connected_value) {
     const bool next_connected = connected_value != 0.0;
-    if (has_published_connection_state_ && connected_ == next_connected) {
+    const bool previous_connected = connected_.load();
+    if (has_published_connection_state_ && previous_connected == next_connected) {
         return;
     }
 
-    connected_ = next_connected;
+    connected_.store(next_connected);
     has_published_connection_state_ = true;
     module_->dartwic->upsertChannelField(instance_name_, "info.connected", DARTWIC::API::ChannelField::VALUE, connected_value);
 }

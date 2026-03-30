@@ -216,6 +216,14 @@ bool ModbusTCPClientModule::writeCoil(int address, bool value) {
     return client_->writeCoil(address, value);
 }
 
+bool ModbusTCPClientModule::isConnected() const {
+    if (!client_) {
+        return false;
+    }
+
+    return client_->isConnected();
+}
+
 const std::string& ModbusTCPClientModule::getInstanceName() const {
     return instance_name_;
 }
@@ -318,6 +326,10 @@ void ModbusTCPClientModule::registerTaskTypes() {
             return;
         }
 
+        if (!module->isConnected()) {
+            return;
+        }
+
         const auto mappings = parseMappings(task_runtime.getArguments());
         for (const auto& mapping : mappings) {
             const auto value = module->readInputRegister(mapping.address);
@@ -407,6 +419,10 @@ void ModbusTCPClientModule::registerTaskTypes() {
         auto module = cached->module.lock();
         if (!module) {
             task_runtime.removeRuntimeContext(MODBUS_WRITE_RUNTIME_KEY);
+            return;
+        }
+
+        if (!module->isConnected()) {
             return;
         }
 

@@ -6,6 +6,7 @@
 #define MODBUS_TCP_CLIENT_H
 
 #include <modbus/modbus.h>
+#include <atomic>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -24,9 +25,9 @@ public:
 
     ~ModbusTCPClient();
 
-    bool ensureConnected();
     void maintainConnection();
     void disconnect();
+    bool isConnected() const;
     std::optional<int16_t> readInputRegister(int address);
     std::vector<std::optional<int16_t>> readInputRegisters(const std::vector<int>& addresses);
     bool writeCoil(int address, bool value);
@@ -47,7 +48,7 @@ private:
     std::mutex ctx_lock_;
     uint32_t tv_sec_{};
     uint32_t tv_usec_{};
-    bool connected_ = false;
+    std::atomic<bool> connected_{false};
     bool has_published_connection_state_ = false;
 };
 
