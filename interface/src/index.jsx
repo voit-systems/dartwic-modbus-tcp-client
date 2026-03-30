@@ -14,10 +14,30 @@ function normalizeMappings(argumentsPayload, convertChannelValuePathToChannelNam
         }));
 }
 
-function normalizeChannelValuePath(channelPath, convertChannelValuePathToChannelName) {
-    return typeof channelPath === "string"
-        ? convertChannelValuePathToChannelName(channelPath)
-        : "";
+function normalizeCoilMappings(argumentsPayload, convertChannelValuePathToChannelName) {
+    if (argumentsPayload && Array.isArray(argumentsPayload.mappings)) {
+        return argumentsPayload.mappings
+            .filter((item) => item && typeof item === "object")
+            .map((item, index) => ({
+                id: `coil-mapping-${index}-${item.coil || ""}-${item.channel || ""}`,
+                coil: Number.isFinite(Number(item.coil)) ? String(item.coil) : "",
+                channel: typeof item.channel === "string"
+                    ? convertChannelValuePathToChannelName(item.channel)
+                    : ""
+            }));
+    }
+
+    if (argumentsPayload && (argumentsPayload.coil != null || argumentsPayload.channel != null)) {
+        return [{
+            id: `coil-mapping-0-${argumentsPayload.coil || ""}-${argumentsPayload.channel || ""}`,
+            coil: Number.isFinite(Number(argumentsPayload.coil)) ? String(argumentsPayload.coil) : "",
+            channel: typeof argumentsPayload.channel === "string"
+                ? convertChannelValuePathToChannelName(argumentsPayload.channel)
+                : ""
+        }];
+    }
+
+    return [];
 }
 
 export const moduleUiPluginMeta = {
@@ -49,36 +69,56 @@ export function createModuleUiPlugin(host) {
     } = host.helpers;
 
     function ModbusTaskSecondaryGui({ task }) {
-        const mappings = normalizeMappings(task.arguments, convertChannelValuePathToChannelName);
-
         if (task.task_type === "modbus.write_coil") {
+            const mappings = normalizeCoilMappings(task.arguments, convertChannelValuePathToChannelName);
             const instanceName = task.arguments?.module_instance_name || "UNBOUND";
-            const coil = Number.isFinite(Number(task.arguments?.coil)) ? String(task.arguments.coil) : "UNSET";
-            const channel = normalizeChannelValuePath(
-                task.arguments?.channel,
-                convertChannelValuePathToChannelName
-            ) || "UNBOUND";
+            const previewMappings = mappings.slice(0, 3);
+            const hiddenMappingCount = Math.max(mappings.length - previewMappings.length, 0);
+            const mappingPreview = mappings.length === 0
+                ? "NO MAPPINGS"
+                : mappings.length === 1
+                    ? "1 MAPPING"
+                    : `${mappings.length} MAPPINGS`;
 
             return (
                 <>
                     <Separator />
-                    <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2 text-xs">
                         <div className="min-w-0 rounded-md border bg-muted/40 px-3 py-2">
                             <div className="text-muted-foreground">MODULE</div>
                             <div className="truncate">{instanceName}</div>
                         </div>
                         <div className="min-w-0 rounded-md border bg-muted/40 px-3 py-2">
-                            <div className="text-muted-foreground">COIL</div>
-                            <div className="truncate">{coil}</div>
+                            <div className="text-muted-foreground">MAPPINGS</div>
+                            <div className="truncate">{mappingPreview}</div>
                         </div>
-                        <div className="min-w-0 rounded-md border bg-muted/40 px-3 py-2">
-                            <div className="text-muted-foreground">CHANNEL</div>
-                            <div className="truncate">{channel}</div>
-                        </div>
+                    </div>
+                    <div className="space-y-2">
+                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Mapping Preview</div>
+                        {previewMappings.length > 0 ? (
+                            <div className="flex flex-wrap gap-2 text-xs">
+                                {previewMappings.map((mapping) => (
+                                    <div
+                                        key={mapping.id}
+                                        className="truncate rounded-md border bg-muted px-2 py-1"
+                                    >
+                                        {mapping.coil} {"->"} {mapping.channel}
+                                    </div>
+                                ))}
+                                {hiddenMappingCount > 0 ? (
+                                    <div className="rounded-md border border-dashed px-2 py-1 text-muted-foreground">
+                                        +{hiddenMappingCount} more
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : (
+                            <div className="text-xs text-muted-foreground">No mappings configured.</div>
+                        )}
                     </div>
                 </>
             );
         }
+        const mappings = normalizeMappings(task.arguments, convertChannelValuePathToChannelName);
         const instanceName = task.arguments?.module_instance_name || "UNBOUND";
         const previewMappings = mappings.slice(0, 3);
         const hiddenMappingCount = Math.max(mappings.length - previewMappings.length, 0);
@@ -127,22 +167,57 @@ export function createModuleUiPlugin(host) {
         );
     }
 
+    function CoilMappingRow({ mapping, onChange, onRemove, removeDisabled }) {
+        return (
+            <div className="grid grid-cols-1 gap-2 rounded-md border p-3 md:grid-cols-[120px_minmax(0,1fr)_auto]">
+                <Input
+                    type="number"
+                    min="0"
+                    placeholder="COIL"
+                    value={mapping.coil}
+                    onChange={(event) => onChange({ ...mapping, coil: event.target.value })}
+                />
+                <ChannelComboBox
+                    mode="read"
+                    showFieldSelector={false}
+                    initialValue={mapping.channel}
+                    placeholder="SELECT CHANNEL"
+                    onSelect={(value) =>
+                        onChange({
+                            ...mapping,
+                            channel: convertChannelValuePathToChannelName(value)
+                        })
+                    }
+                    className="min-w-0 w-full"
+                />
+                <Button variant="ghost" onClick={onRemove} disabled={removeDisabled}>
+                    REMOVE
+                </Button>
+            </div>
+        );
+    }
+
     function ModbusWriteCoilTaskDetailGui({ task, operation, onSaved, onClose }) {
+        const mappingIdRef = useRef(0);
         const [moduleInstances, setModuleInstances] = useState([]);
         const [selectedInstance, setSelectedInstance] = useState(task.arguments?.module_instance_name || "");
-        const [coil, setCoil] = useState(
-            Number.isFinite(Number(task.arguments?.coil)) ? String(task.arguments.coil) : ""
-        );
-        const [channel, setChannel] = useState(
-            normalizeChannelValuePath(task.arguments?.channel, convertChannelValuePathToChannelName)
+        const [mappings, setMappings] = useState(() =>
+            normalizeCoilMappings(task.arguments, convertChannelValuePathToChannelName).map((mapping) => ({
+                ...mapping,
+                id: `coil-mapping-${mappingIdRef.current++}`
+            }))
         );
         const [errorMessage, setErrorMessage] = useState("");
         const [isSaving, setIsSaving] = useState(false);
 
         useEffect(() => {
             setSelectedInstance(task.arguments?.module_instance_name || "");
-            setCoil(Number.isFinite(Number(task.arguments?.coil)) ? String(task.arguments.coil) : "");
-            setChannel(normalizeChannelValuePath(task.arguments?.channel, convertChannelValuePathToChannelName));
+            setMappings(
+                normalizeCoilMappings(task.arguments, convertChannelValuePathToChannelName).map((mapping) => ({
+                    ...mapping,
+                    id: `coil-mapping-${mappingIdRef.current++}`
+                }))
+            );
             setErrorMessage("");
         }, [task]);
 
@@ -174,21 +249,20 @@ export function createModuleUiPlugin(host) {
         }, [operation]);
 
         async function saveTask() {
-            const cleanedCoil = Number(coil);
-            const cleanedChannel = channel.trim();
+            const cleanedMappings = mappings
+                .map((mapping) => ({
+                    coil: Number(mapping.coil),
+                    channel: mapping.channel.trim()
+                }))
+                .filter((mapping) => Number.isFinite(mapping.coil) && mapping.channel !== "");
 
             if (!selectedInstance) {
                 setErrorMessage("SELECT A MODBUS MODULE INSTANCE.");
                 return;
             }
 
-            if (!Number.isFinite(cleanedCoil)) {
-                setErrorMessage("ENTER A VALID COIL ADDRESS.");
-                return;
-            }
-
-            if (!cleanedChannel) {
-                setErrorMessage("SELECT A DARTWIC CHANNEL.");
+            if (cleanedMappings.length === 0) {
+                setErrorMessage("ADD AT LEAST ONE COIL/CHANNEL MAPPING.");
                 return;
             }
 
@@ -202,8 +276,7 @@ export function createModuleUiPlugin(host) {
                     task_type: task.task_type,
                     arguments: {
                         module_instance_name: selectedInstance,
-                        coil: cleanedCoil,
-                        channel: cleanedChannel
+                        mappings: cleanedMappings
                     }
                 }, 30000);
 
@@ -249,25 +322,48 @@ export function createModuleUiPlugin(host) {
                         </Select>
                     </div>
                     <div className="space-y-2">
-                        <Label>COIL ADDRESS</Label>
-                        <Input
-                            type="number"
-                            min="0"
-                            placeholder="COIL"
-                            value={coil}
-                            onChange={(event) => setCoil(event.target.value)}
-                        />
-                    </div>
-                    <div className="space-y-2">
-                        <Label>SOURCE CHANNEL</Label>
-                        <ChannelComboBox
-                            mode="read"
-                            showFieldSelector={false}
-                            initialValue={channel}
-                            placeholder="SELECT CHANNEL"
-                            onSelect={(value) => setChannel(convertChannelValuePathToChannelName(value))}
-                            className="min-w-0 w-full"
-                        />
+                        <div className="flex items-center justify-between gap-2">
+                            <Label>MAPPINGS</Label>
+                            <Button
+                                variant="outline"
+                                onClick={() =>
+                                    setMappings((current) => current.concat([{
+                                        id: `coil-mapping-${mappingIdRef.current++}`,
+                                        coil: "",
+                                        channel: ""
+                                    }]))
+                                }
+                            >
+                                ADD
+                            </Button>
+                        </div>
+                        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                            {mappings.length === 0 ? (
+                                <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                                    NO MAPPINGS CONFIGURED.
+                                </div>
+                            ) : (
+                                mappings.map((mapping, index) => (
+                                    <CoilMappingRow
+                                        key={mapping.id}
+                                        mapping={mapping}
+                                        onChange={(nextMapping) =>
+                                            setMappings((current) =>
+                                                current.map((item, itemIndex) =>
+                                                    itemIndex === index ? nextMapping : item
+                                                )
+                                            )
+                                        }
+                                        onRemove={() =>
+                                            setMappings((current) =>
+                                                current.filter((_, itemIndex) => itemIndex !== index)
+                                            )
+                                        }
+                                        removeDisabled={isSaving}
+                                    />
+                                ))
+                            )}
+                        </div>
                     </div>
                     {errorMessage ? (
                         <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">

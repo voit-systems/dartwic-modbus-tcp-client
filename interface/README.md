@@ -11,7 +11,7 @@ Build the runtime plugin with:
 
 That writes the drag-and-drop app files to:
 
-- `package/interface-module/<package_id>`
+- `package/interface-module/<package_id>/ui`
 
 For local desktop-app development, you can also run:
 

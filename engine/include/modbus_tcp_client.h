@@ -37,7 +37,6 @@ private:
     bool connectUnlocked();
     void disconnectUnlocked();
     void handleDisconnectUnlocked(const std::string& error_message);
-    void onError(const char* error);
     void setConnected(double connected_value);
 
     ModbusTCPClientModule* module_;

@@ -35,6 +35,10 @@ Each mapping contains:
 The `modbus.write_coil` task expects:
 
 - `module_instance_name`: The target Modbus TCP client module instance to use
+- `mappings`: A list of coil-to-channel mappings
+
+Each mapping contains:
+
 - `coil`: The Modbus coil address to write
 - `channel`: The DARTWIC channel whose current value should be written to the coil
 
@@ -47,7 +51,7 @@ In practice, a typical setup flow is:
 3. Create a `modbus.read_input_registers` task.
 4. Select the module instance in `module_instance_name`.
 5. Add one or more `mappings` entries from Modbus input registers to DARTWIC channels.
-6. For coil output control, create a `modbus.write_coil` task and map a DARTWIC channel to a Modbus coil address.
+6. For coil output control, create a `modbus.write_coil` task and add one or more coil-to-channel mappings.
 
 ## Build Layout
 
@@ -65,7 +69,7 @@ The engine source remains in `engine/`, and the interface source remains in `int
 - Build the UI plugin with `npm run build`
 - For local desktop-app development, run `npm run install:dev`
 
-That writes the interface release bundle to `package/interface-module/<package_id>`.
+That writes the interface release bundle to `package/interface-module/<package_id>/ui`.
 
 ## Engine
 

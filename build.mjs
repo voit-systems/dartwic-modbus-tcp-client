@@ -13,7 +13,7 @@ const manifestPath = path.resolve(interfaceRoot, "ui", "plugin.json");
 const packageInfo = JSON.parse(await readFile(packageInfoPath, "utf8"));
 const packageId = packageInfo.id;
 const moduleName = packageId;
-const releaseUiDir = path.resolve(repoRoot, "package", "interface-module", packageId);
+const releaseUiDir = path.resolve(repoRoot, "package", "interface-module", packageId, "ui");
 const devInstallUiDir = path.resolve(repoRoot, "interface", "modules", "registry", moduleName, "ui");
 const shouldInstallDev = process.argv.includes("--install-dev");
 

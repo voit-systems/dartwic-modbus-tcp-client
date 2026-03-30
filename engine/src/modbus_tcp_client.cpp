@@ -8,7 +8,6 @@
 #include <cstring>
 #include <iostream>
 #include <modbus_tcp_client_module.h>
-#include <random>
 #include <sstream>
 #include <string>
 
@@ -21,15 +20,6 @@
 #endif
 
 namespace {
-    constexpr int kProbeRegisterMin = 0;
-    constexpr int kProbeRegisterMax = 65535;
-
-    int getRandomProbeRegisterAddress() {
-        thread_local std::mt19937 generator{std::random_device{}()};
-        std::uniform_int_distribution<int> distribution(kProbeRegisterMin, kProbeRegisterMax);
-        return distribution(generator);
-    }
-
     void publishModbusConnectionError(ModbusTCPClientModule* module,
         const std::string& instance_name,
         const std::string& error_message) {
@@ -80,16 +70,7 @@ bool ModbusTCPClient::ensureConnected() {
 
 void ModbusTCPClient::maintainConnection() {
     std::lock_guard<std::mutex> lock(ctx_lock_);
-    if (!connectUnlocked()) {
-        return;
-    }
-
-    uint16_t probe_value = 0;
-    const int probe_address = getRandomProbeRegisterAddress();
-    const int rc = modbus_read_input_registers(ctx_, probe_address, 1, &probe_value);
-    if (rc == -1) {
-        handleDisconnectUnlocked("INPUT REGISTER PROBE FAILED AT " + std::to_string(probe_address) + ": " + modbus_strerror(errno));
-    }
+    connectUnlocked();
 }
 
 void ModbusTCPClient::disconnect() {
@@ -106,7 +87,7 @@ std::optional<int16_t> ModbusTCPClient::readInputRegister(int address) {
     uint16_t raw_value = 0;
     const int rc = modbus_read_input_registers(ctx_, address, 1, &raw_value);
     if (rc == -1) {
-        onError(modbus_strerror(errno));
+        handleDisconnectUnlocked(modbus_strerror(errno));
         return std::nullopt;
     }
 
@@ -132,7 +113,7 @@ bool ModbusTCPClient::writeCoil(int address, bool value) {
     std::lock_guard<std::mutex> lock(ctx_lock_);
     const int rc = modbus_write_bit(ctx_, address, value ? 1 : 0);
     if (rc == -1) {
-        onError(modbus_strerror(errno));
+        handleDisconnectUnlocked(modbus_strerror(errno));
         return false;
     }
 
@@ -141,11 +122,6 @@ bool ModbusTCPClient::writeCoil(int address, bool value) {
 
 const std::string& ModbusTCPClient::getInstanceName() const {
     return instance_name_;
-}
-
-void ModbusTCPClient::onError(const char* error) {
-    std::lock_guard<std::mutex> lock(ctx_lock_);
-    handleDisconnectUnlocked(error == nullptr ? "UNKNOWN ERROR" : error);
 }
 
 void ModbusTCPClient::setConnected(double connected_value) {

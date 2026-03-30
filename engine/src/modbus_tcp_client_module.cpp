@@ -103,32 +103,44 @@ namespace {
         return mappings;
     }
 
-    struct CoilWriteArguments {
-        int coil = 0;
-        std::string channel;
-    };
-
-    std::optional<CoilWriteArguments> parseCoilWriteArguments(const nlohmann::json& arguments) {
+    std::vector<Mapping> parseCoilMappings(const nlohmann::json& arguments) {
+        std::vector<Mapping> mappings;
         if (!arguments.is_object()) {
-            return std::nullopt;
+            return mappings;
         }
 
-        if (!arguments.contains("coil") || !arguments["coil"].is_number_integer()) {
-            return std::nullopt;
+        if (arguments.contains("mappings") && arguments["mappings"].is_array()) {
+            for (const auto& item : arguments["mappings"]) {
+                if (!item.is_object()) {
+                    continue;
+                }
+
+                if (!item.contains("coil") || !item["coil"].is_number_integer()) {
+                    continue;
+                }
+
+                if (!item.contains("channel") || !item["channel"].is_string()) {
+                    continue;
+                }
+
+                Mapping mapping;
+                mapping.address = item["coil"].get<int>();
+                mapping.channel = normalizeMappedChannelPath(item["channel"].get<std::string>());
+                mappings.push_back(std::move(mapping));
+            }
+
+            return mappings;
         }
 
-        if (!arguments.contains("channel") || !arguments["channel"].is_string()) {
-            return std::nullopt;
+        if (arguments.contains("coil") && arguments["coil"].is_number_integer() &&
+            arguments.contains("channel") && arguments["channel"].is_string()) {
+            Mapping mapping;
+            mapping.address = arguments["coil"].get<int>();
+            mapping.channel = normalizeMappedChannelPath(arguments["channel"].get<std::string>());
+            mappings.push_back(std::move(mapping));
         }
 
-        CoilWriteArguments parsed;
-        parsed.coil = arguments["coil"].get<int>();
-        parsed.channel = normalizeMappedChannelPath(arguments["channel"].get<std::string>());
-        if (parsed.channel.empty()) {
-            return std::nullopt;
-        }
-
-        return parsed;
+        return mappings;
     }
 }
 
@@ -371,8 +383,7 @@ void ModbusTCPClientModule::registerTaskTypes() {
     write_task_type.metadata.expected_module_registry = "modbus_tcp_client";
     write_task_type.metadata.default_arguments = {
         {"module_instance_name", ""},
-        {"coil", 0},
-        {"channel", ""}
+        {"mappings", nlohmann::json::array()}
     };
 
     write_task_type.on_start = [resolve_context](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
@@ -399,24 +410,22 @@ void ModbusTCPClientModule::registerTaskTypes() {
             return;
         }
 
-        const auto coil_write = parseCoilWriteArguments(task_runtime.getArguments());
-        if (!coil_write.has_value()) {
-            return;
+        const auto mappings = parseCoilMappings(task_runtime.getArguments());
+        for (const auto& mapping : mappings) {
+            const auto channel_path = splitChannelPath(mapping.channel);
+            if (!channel_path.has_value()) {
+                continue;
+            }
+
+            const double channel_value = dartwic->queryChannelField(
+                channel_path->first,
+                channel_path->second,
+                DARTWIC::API::ChannelField::VALUE,
+                DARTWIC::API::ChannelValue{0.0}
+            );
+
+            module->writeCoil(mapping.address, channel_value != 0.0);
         }
-
-        const auto channel_path = splitChannelPath(coil_write->channel);
-        if (!channel_path.has_value()) {
-            return;
-        }
-
-        const double channel_value = dartwic->queryChannelField(
-            channel_path->first,
-            channel_path->second,
-            DARTWIC::API::ChannelField::VALUE,
-            DARTWIC::API::ChannelValue{0.0}
-        );
-
-        module->writeCoil(coil_write->coil, channel_value != 0.0);
     };
 
     write_task_type.on_end = [](const DARTWIC::API::TaskTypeDefinition&, DARTWIC::API::TaskRuntime& task_runtime) {
