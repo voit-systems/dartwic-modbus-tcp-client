@@ -553,7 +553,7 @@ export function createModuleUiPlugin(host) {
                                 ADD
                             </Button>
                         </div>
-                        <div className="space-y-2">
+                        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
                             {mappings.length === 0 ? (
                                 <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
                                     NO MAPPINGS CONFIGURED.

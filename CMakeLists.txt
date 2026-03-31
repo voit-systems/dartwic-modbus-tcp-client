@@ -11,9 +11,16 @@ endif()
 
 set(ENGINE_DIR "${PROJECT_SOURCE_DIR}/engine")
 set(PACKAGE_INFO_FILE "${PROJECT_SOURCE_DIR}/package-info.json")
+set(BUILD_CONFIGURATION_FILE "${PROJECT_SOURCE_DIR}/build-configuration.json")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${BUILD_CONFIGURATION_FILE}")
 
 file(READ "${PACKAGE_INFO_FILE}" PACKAGE_INFO_JSON)
 string(JSON PACKAGE_ID GET "${PACKAGE_INFO_JSON}" id)
+file(READ "${BUILD_CONFIGURATION_FILE}" BUILD_CONFIGURATION_JSON)
+string(JSON ENGINE_INSTALL_DIR ERROR_VARIABLE ENGINE_INSTALL_DIR_ERROR GET "${BUILD_CONFIGURATION_JSON}" engine_dir)
+if(NOT ENGINE_INSTALL_DIR_ERROR AND NOT "${ENGINE_INSTALL_DIR}" STREQUAL "" AND NOT "${ENGINE_INSTALL_DIR}" STREQUAL "null")
+    file(TO_CMAKE_PATH "${ENGINE_INSTALL_DIR}" ENGINE_INSTALL_DIR)
+endif()
 set(ENGINE_PACKAGE_DIR "${PROJECT_SOURCE_DIR}/package/engine-module/${PACKAGE_ID}")
 
 ############### SOURCE FILES ###############
@@ -61,3 +68,13 @@ add_custom_command(TARGET modbus_tcp_client POST_BUILD
         "${ENGINE_PACKAGE_DIR}/module_config.yaml"
         COMMENT "Copying module_config.yaml to output folder"
 )
+
+if(NOT ENGINE_INSTALL_DIR_ERROR AND NOT "${ENGINE_INSTALL_DIR}" STREQUAL "" AND NOT "${ENGINE_INSTALL_DIR}" STREQUAL "null")
+    set(ENGINE_REGISTRY_DIR "${ENGINE_INSTALL_DIR}/modules/registry/${PACKAGE_ID}")
+
+    add_custom_command(TARGET modbus_tcp_client POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_INSTALL_DIR}/modules/registry"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ENGINE_PACKAGE_DIR}" "${ENGINE_REGISTRY_DIR}"
+            COMMENT "Copying packaged engine module to external engine registry"
+    )
+endif()

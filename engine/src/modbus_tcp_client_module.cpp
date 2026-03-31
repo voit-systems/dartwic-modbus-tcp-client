@@ -162,6 +162,10 @@ ModbusTCPClient & ModbusTCPClientModule::getTCPClient() {
 }
 
 extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_API* drtw) {
+
+    std::cout << "hello" << std::endl;
+
+
     ///// READ TASK /////
     DARTWIC::API::TaskTypeDefinition read_task_type;
     read_task_type.metadata.task_type = "modbus.read_input_registers";;
