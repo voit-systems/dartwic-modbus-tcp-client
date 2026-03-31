@@ -14,15 +14,11 @@ class ModbusTCPClientModule : public DARTWIC::Modules::BaseModule {
 public:
     ModbusTCPClientModule(YAML::Node cfg, DARTWIC::API::SDK_API* drtw);
 
-    void onRegistryLoaded() override;
-
     ModbusTCPClient& getTCPClient();
 
     ~ModbusTCPClientModule() override;
 
 private:
-    void registerTaskTypes();
-
     std::string instance_name_;
     ModbusTCPClient client_;
 };

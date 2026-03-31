@@ -5,6 +5,7 @@
 #include "modbus_tcp_client_module.h"
 
 #include <atomic>
+#include <iostream>
 #include <memory>
 #include <unordered_set>
 #include <string>
@@ -156,16 +157,11 @@ ModbusTCPClientModule::~ModbusTCPClientModule() {
 
 }
 
-void ModbusTCPClientModule::onRegistryLoaded() {
-    registerTaskTypes();
-}
-
 ModbusTCPClient & ModbusTCPClientModule::getTCPClient() {
     return client_;
 }
 
-void ModbusTCPClientModule::registerTaskTypes() {
-
+extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_API* drtw) {
     ///// READ TASK /////
     DARTWIC::API::TaskTypeDefinition read_task_type;
     read_task_type.metadata.task_type = "modbus.read_input_registers";;
@@ -178,7 +174,7 @@ void ModbusTCPClientModule::registerTaskTypes() {
     };
 
     /// START ///
-    read_task_type.on_start = [this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
+    read_task_type.on_start = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
 
         // SET CHANNEL AUTHORITY
         // go through each channel used by this task and set to observe only autority
@@ -190,19 +186,19 @@ void ModbusTCPClientModule::registerTaskTypes() {
                 continue;
             }
 
-            dartwic->upsertChannelField(
+            drtw->upsertChannelField(
                 channel_path->first,
                 channel_path->second,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
                 std::string{"observe_only"}
             );
-            dartwic->upsertChannelField(
+            drtw->upsertChannelField(
                 channel_path->first,
                 channel_path->second,
                 DARTWIC::API::ChannelField::CONTROL_OWNER,
                 task_controller
             );
-            dartwic->upsertChannelField(
+            drtw->upsertChannelField(
                 channel_path->first,
                 channel_path->second,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
@@ -212,10 +208,10 @@ void ModbusTCPClientModule::registerTaskTypes() {
     };
 
     /// TASK ///
-    read_task_type.on_task = [this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
+    read_task_type.on_task = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
         /// GET MODULE INSTANCE AND CLIENT
         std::string instance_name = task_runtime.getArguments()["module_instance_name"];
-        auto module = dartwic->getModuleInstance(instance_name);
+        auto module = drtw->getModuleInstance(instance_name);
 
         // cast
         auto modbusModule = std::dynamic_pointer_cast<ModbusTCPClientModule>(module);
@@ -244,7 +240,7 @@ void ModbusTCPClientModule::registerTaskTypes() {
                 continue;
             }
 
-            dartwic->upsertChannelField(
+            drtw->upsertChannelField(
                 channel_path->first,
                 channel_path->second,
                 DARTWIC::API::ChannelField::VALUE,
@@ -253,7 +249,7 @@ void ModbusTCPClientModule::registerTaskTypes() {
         }
     };
 
-    read_task_type.on_end = [this](const DARTWIC::API::TaskTypeDefinition&, DARTWIC::API::TaskRuntime& task_runtime) {
+    read_task_type.on_end = [drtw](const DARTWIC::API::TaskTypeDefinition&, DARTWIC::API::TaskRuntime& task_runtime) {
         // SET CHANNEL AUTHORITY
         // set to free once done
         const auto mappings = parseMappings(task_runtime.getArguments());
@@ -263,19 +259,19 @@ void ModbusTCPClientModule::registerTaskTypes() {
                 continue;
             }
 
-            dartwic->upsertChannelField(
+            drtw->upsertChannelField(
                 channel_path->first,
                 channel_path->second,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
                 std::string{"free"}
             );
-            dartwic->upsertChannelField(
+            drtw->upsertChannelField(
                 channel_path->first,
                 channel_path->second,
                 DARTWIC::API::ChannelField::CONTROL_OWNER,
                 std::string{""}
             );
-            dartwic->upsertChannelField(
+            drtw->upsertChannelField(
                 channel_path->first,
                 channel_path->second,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
@@ -289,7 +285,7 @@ void ModbusTCPClientModule::registerTaskTypes() {
     };
 
     // register
-    dartwic->registerTaskType(read_task_type);
+    drtw->registerTaskType(read_task_type);
 
 
     ///// WRITE TASK /////
@@ -303,14 +299,14 @@ void ModbusTCPClientModule::registerTaskTypes() {
         {"mappings", nlohmann::json::array()}
     };
 
-    write_task_type.on_start = [this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
+    write_task_type.on_start = [](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
         // nothing for now
     };
 
-    write_task_type.on_task = [this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
+    write_task_type.on_task = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
         /// GET MODULE INSTANCE AND CLIENT
         std::string instance_name = task_runtime.getArguments()["module_instance_name"];
-        auto module = dartwic->getModuleInstance(instance_name);
+        auto module = drtw->getModuleInstance(instance_name);
 
         // cast
         auto modbusModule = std::dynamic_pointer_cast<ModbusTCPClientModule>(module);
@@ -334,7 +330,7 @@ void ModbusTCPClientModule::registerTaskTypes() {
                 continue;
             }
 
-            const double channel_value = dartwic->queryChannelField(
+            const double channel_value = drtw->queryChannelField(
                 channel_path->first,
                 channel_path->second,
                 DARTWIC::API::ChannelField::VALUE,
@@ -354,9 +350,11 @@ void ModbusTCPClientModule::registerTaskTypes() {
     };
 
     // register
-    dartwic->registerTaskType(write_task_type);
+    drtw->registerTaskType(write_task_type);
 }
 
 extern "C" EXPORT_API DARTWIC::Modules::BaseModule* createModule(YAML::Node cfg, DARTWIC::API::SDK_API* drtw) {
     return new ModbusTCPClientModule(cfg, drtw);
 }
+
+
