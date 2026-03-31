@@ -81,34 +81,46 @@ ModbusTCPClient::ModbusTCPClient(ModbusTCPClientModule* module,
       server_port_(server_port),
       tv_sec_(tv_sec),
       tv_usec_(tv_usec) {
-    setConnected(0.0);
+
+    module_->dartwic->onLoop("modbus_connection_monitor_" + instance_name_, [this]() {
+
+        // NOT CONNECTED - attempt connection
+        if (!connected_) {
+            connect();
+
+        // CONNECTED - check connection
+        } else {
+            checkConnection();
+        }
+
+    });
+
 }
 
 ModbusTCPClient::~ModbusTCPClient() {
     disconnect();
-}
-
-void ModbusTCPClient::maintainConnection() {
-    std::lock_guard<std::mutex> lock(ctx_lock_);
-    if (ctx_ == nullptr) {
-        connectUnlocked();
-        return;
-    }
-
-    uint16_t probe_value = 0;
-    const int rc = modbus_read_input_registers(ctx_, 0, 1, &probe_value);
-    if (rc == -1) {
-        handleDisconnectUnlocked(modbus_strerror(errno));
-    }
-}
-
-void ModbusTCPClient::disconnect() {
-    std::lock_guard<std::mutex> lock(ctx_lock_);
-    disconnectUnlocked();
+    module_->dartwic->removeLoop("modbus_connection_monitor_" + instance_name_);
 }
 
 bool ModbusTCPClient::isConnected() const {
     return connected_.load();
+}
+
+void ModbusTCPClient::checkConnection() {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (ctx_ == nullptr || !connected_.load()) {
+        return;
+    }
+
+    // READ INPUT REGISTER 0
+    uint16_t raw_value = 0;
+    const int rc = modbus_read_input_registers(ctx_, 0, 1, &raw_value);
+
+    // ERROR - NOT CONNECTED
+    if (rc == -1) {
+        publishModbusConnectionError(module_, instance_name_, modbus_strerror(errno));
+        setConnected(0.0);
+    }
 }
 
 std::optional<int16_t> ModbusTCPClient::readInputRegister(int address) {
@@ -153,28 +165,22 @@ bool ModbusTCPClient::writeCoil(int address, bool value) {
     return true;
 }
 
-const std::string& ModbusTCPClient::getInstanceName() const {
-    return instance_name_;
-}
 
 void ModbusTCPClient::setConnected(double connected_value) {
     const bool next_connected = connected_value != 0.0;
-    const bool previous_connected = connected_.load();
-    if (has_published_connection_state_ && previous_connected == next_connected) {
-        return;
-    }
-
+    // set connected flag
     connected_.store(next_connected);
-    has_published_connection_state_ = true;
+    // set connected channel in dartwic
     module_->dartwic->upsertChannelField(instance_name_, "info.connected", DARTWIC::API::ChannelField::VALUE, connected_value);
 }
 
-bool ModbusTCPClient::connectUnlocked() {
-    if (ctx_ != nullptr) {
-        return true;
-    }
+bool ModbusTCPClient::connect() {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
 
+    /// CREATE TCP CONTEXT ///
     ctx_ = modbus_new_tcp(server_ip_.c_str(), server_port_);
+
+    // CREATION ERROR
     if (ctx_ == nullptr) {
         std::cerr << "Unable to create Modbus TCP context." << std::endl;
         publishModbusConnectionError(module_, instance_name_, "UNABLE TO CREATE MODBUS TCP CONTEXT");
@@ -182,14 +188,22 @@ bool ModbusTCPClient::connectUnlocked() {
         return false;
     }
 
-    if (modbus_connect(ctx_) == -1) {
+    /// CONNECT TO SERVER ///
+    int connect_result =  modbus_connect(ctx_);
+
+    // CONNECTION ERROR
+    if (connect_result == -1) {
         publishModbusConnectionError(module_, instance_name_, modbus_strerror(errno));
+
+        // reset context - failed
         modbus_free(ctx_);
         ctx_ = nullptr;
         setConnected(0.0);
         return false;
     }
 
+    /// SUCCESS ///
+    //set context settings
     modbus_set_response_timeout(ctx_, tv_sec_, tv_usec_);
     setConnected(1.0);
 
@@ -201,17 +215,13 @@ bool ModbusTCPClient::connectUnlocked() {
     return true;
 }
 
-void ModbusTCPClient::disconnectUnlocked() {
+void ModbusTCPClient::disconnect() {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+
     if (ctx_ != nullptr) {
         modbus_close(ctx_);
         modbus_free(ctx_);
         ctx_ = nullptr;
     }
     setConnected(0.0);
-}
-
-void ModbusTCPClient::handleDisconnectUnlocked(const std::string& error_message) {
-    std::cerr << "Error: " << error_message << std::endl;
-    publishModbusConnectionError(module_, instance_name_, error_message);
-    disconnectUnlocked();
 }

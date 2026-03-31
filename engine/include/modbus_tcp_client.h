@@ -25,19 +25,16 @@ public:
 
     ~ModbusTCPClient();
 
-    void maintainConnection();
-    void disconnect();
     bool isConnected() const;
+
     std::optional<int16_t> readInputRegister(int address);
     std::vector<std::optional<int16_t>> readInputRegisters(const std::vector<int>& addresses);
     bool writeCoil(int address, bool value);
 
-    const std::string& getInstanceName() const;
-
 private:
-    bool connectUnlocked();
-    void disconnectUnlocked();
-    void handleDisconnectUnlocked(const std::string& error_message);
+    bool connect();
+    void checkConnection();
+    void disconnect();
     void setConnected(double connected_value);
 
     ModbusTCPClientModule* module_;
@@ -49,7 +46,6 @@ private:
     uint32_t tv_sec_{};
     uint32_t tv_usec_{};
     std::atomic<bool> connected_{false};
-    bool has_published_connection_state_ = false;
 };
 
 #endif //MODBUS_TCP_CLIENT_H
