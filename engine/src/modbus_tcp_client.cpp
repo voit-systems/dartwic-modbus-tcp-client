@@ -121,7 +121,6 @@ std::optional<int16_t> ModbusTCPClient::readInputRegister(int address) {
     const int rc = modbus_read_input_registers(ctx_, address, 1, &raw_value);
     if (rc == -1) {
         publishModbusOperationError(module_, instance_name_, "read_input_register", modbus_strerror(errno));
-        disconnectUnlocked();
         return std::nullopt;
     }
 
@@ -148,7 +147,6 @@ bool ModbusTCPClient::writeCoil(int address, bool value) {
     const int rc = modbus_write_bit(ctx_, address, value ? 1 : 0);
     if (rc == -1) {
         publishModbusOperationError(module_, instance_name_, "write_coil", modbus_strerror(errno));
-        disconnectUnlocked();
         return false;
     }
 
