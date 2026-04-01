@@ -1,8 +1,8 @@
 {
   "id": "modbus_tcp_client",
-  "version": "0.1.0",
-  "engine_modules_api_version": "1",
-  "interface_modules_api_version": "1",
+  "version": "0.2.0",
+  "engine_modules_api_version": "1.0",
+  "interface_modules_api_version": "1.0",
   "contains_engine_module": true,
-  "contains_interface_module": false
+  "contains_interface_module": true
 }

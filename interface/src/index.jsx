@@ -40,6 +40,60 @@ function normalizeCoilMappings(argumentsPayload, convertChannelValuePathToChanne
     return [];
 }
 
+const mappingScrollbarClassName = "modbus-shadcn-scrollbar";
+const mappingScrollbarStyleId = "modbus-shadcn-scrollbar-styles";
+
+function ensureMappingScrollbarStyles() {
+    if (typeof document === "undefined" || document.getElementById(mappingScrollbarStyleId)) {
+        return;
+    }
+
+    const style = document.createElement("style");
+    style.id = mappingScrollbarStyleId;
+    style.textContent = `
+        .${mappingScrollbarClassName} {
+            scrollbar-width: thin;
+            scrollbar-color: hsl(var(--foreground) / 0.7) transparent;
+        }
+
+        .${mappingScrollbarClassName}::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+            background: transparent;
+            -webkit-appearance: none;
+        }
+
+        .${mappingScrollbarClassName}::-webkit-scrollbar-track {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            -webkit-appearance: none;
+        }
+
+        .${mappingScrollbarClassName}::-webkit-scrollbar-track-piece {
+            background: transparent;
+            border: none;
+        }
+
+        .${mappingScrollbarClassName}::-webkit-scrollbar-thumb {
+            border-radius: 9999px;
+            background: hsl(var(--foreground) / 0.7);
+            border: none;
+            box-shadow: none;
+        }
+
+        .${mappingScrollbarClassName}::-webkit-scrollbar-thumb:hover {
+            background: hsl(var(--foreground) / 0.85);
+        }
+
+        .${mappingScrollbarClassName}::-webkit-scrollbar-corner {
+            background: transparent;
+        }
+    `;
+
+    document.head.appendChild(style);
+}
+
 export const moduleUiPluginMeta = {
     moduleName: "modbus_tcp_client",
     taskTypes: ["modbus.read_input_registers", "modbus.write_coil"]
@@ -211,6 +265,10 @@ export function createModuleUiPlugin(host) {
         const [isSaving, setIsSaving] = useState(false);
 
         useEffect(() => {
+            ensureMappingScrollbarStyles();
+        }, []);
+
+        useEffect(() => {
             setSelectedInstance(task.arguments?.module_instance_name || "");
             setMappings(
                 normalizeCoilMappings(task.arguments, convertChannelValuePathToChannelName).map((mapping) => ({
@@ -337,7 +395,7 @@ export function createModuleUiPlugin(host) {
                                 ADD
                             </Button>
                         </div>
-                        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                        <div className={`max-h-72 space-y-2 overflow-y-auto ${mappingScrollbarClassName}`}>
                             {mappings.length === 0 ? (
                                 <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
                                     NO MAPPINGS CONFIGURED.
@@ -425,6 +483,10 @@ export function createModuleUiPlugin(host) {
         );
         const [errorMessage, setErrorMessage] = useState("");
         const [isSaving, setIsSaving] = useState(false);
+
+        useEffect(() => {
+            ensureMappingScrollbarStyles();
+        }, []);
 
         useEffect(() => {
             setSelectedInstance(task.arguments?.module_instance_name || "");
@@ -553,7 +615,7 @@ export function createModuleUiPlugin(host) {
                                 ADD
                             </Button>
                         </div>
-                        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                        <div className={`max-h-72 space-y-2 overflow-y-auto ${mappingScrollbarClassName}`}>
                             {mappings.length === 0 ? (
                                 <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
                                     NO MAPPINGS CONFIGURED.

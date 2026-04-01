@@ -120,6 +120,10 @@ void ModbusTCPClient::checkConnection() {
     if (rc == -1) {
         publishModbusConnectionError(module_, instance_name_, modbus_strerror(errno));
         setConnected(0.0);
+
+    // CONNECTED - keep setting setconnected to 1.0
+    } else {
+        setConnected(1.0);
     }
 }
 
