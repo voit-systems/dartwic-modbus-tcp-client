@@ -195,6 +195,21 @@ bool ModbusTCPClient::writeCoil(int address, bool value) {
     return true;
 }
 
+bool ModbusTCPClient::writeCoilBlock(int start_address, const std::vector<uint8_t>& values) {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (ctx_ == nullptr || !connected_.load() || values.empty()) {
+        return false;
+    }
+
+    const int rc = modbus_write_bits(ctx_, start_address, static_cast<int>(values.size()), values.data());
+    if (rc == -1) {
+        publishModbusOperationError(module_, instance_name_, "write_coil_block", modbus_strerror(errno));
+        return false;
+    }
+
+    return true;
+}
+
 std::optional<uint8_t> ModbusTCPClient::readCoil(int address) {
     std::lock_guard<std::mutex> lock(ctx_lock_);
     if (ctx_ == nullptr || !connected_.load()) {
@@ -209,6 +224,22 @@ std::optional<uint8_t> ModbusTCPClient::readCoil(int address) {
     }
 
     return static_cast<uint8_t>(raw_value);
+}
+
+std::optional<std::vector<uint8_t>> ModbusTCPClient::readCoilBlock(int start_address, int count) {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (ctx_ == nullptr || !connected_.load() || count <= 0) {
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> values(static_cast<size_t>(count), 0);
+    const int rc = modbus_read_bits(ctx_, start_address, count, values.data());
+    if (rc == -1) {
+        publishModbusOperationError(module_, instance_name_, "read_coil_block", modbus_strerror(errno));
+        return std::nullopt;
+    }
+
+    return values;
 }
 
 

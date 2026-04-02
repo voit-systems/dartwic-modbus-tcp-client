@@ -8,7 +8,6 @@
 #include <atomic>
 #include <iostream>
 #include <memory>
-#include <unordered_map>
 #include <unordered_set>
 #include <string>
 #include <vector>
@@ -26,8 +25,6 @@ namespace {
         std::string channel;
         std::string state_channel;
     };
-
-    using CoilCommandCache = std::unordered_map<int, bool>;
 
     std::string normalizeMappedChannelPath(std::string channel_path) {
         const auto slash_index = channel_path.find('/');
@@ -183,6 +180,10 @@ namespace {
                 .state_channel = channel_path->second + "_state"
             });
         }
+
+        std::sort(resolved.begin(), resolved.end(), [](const ResolvedMapping& lhs, const ResolvedMapping& rhs) {
+            return lhs.address < rhs.address;
+        });
 
         return resolved;
     }
@@ -376,7 +377,6 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         const std::string task_controller = "task:" + task_runtime.getPortalName() + "/" + task_runtime.getTaskName();
         const auto mappings = resolveCoilMappings(task_runtime.getArguments());
         task_runtime.setTypedRuntimeContext("resolved_coil_mappings", std::make_shared<std::vector<ResolvedMapping>>(mappings));
-        task_runtime.setTypedRuntimeContext("coil_command_cache", std::make_shared<CoilCommandCache>());
         for (const auto& mapping : mappings) {
 
             //state channel
@@ -456,40 +456,60 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
             task_runtime.setTypedRuntimeContext("resolved_coil_mappings", mappings);
         }
 
-        auto coil_command_cache = task_runtime.getTypedRuntimeContext<CoilCommandCache>("coil_command_cache");
-        if (!coil_command_cache) {
-            coil_command_cache = std::make_shared<CoilCommandCache>();
-            task_runtime.setTypedRuntimeContext("coil_command_cache", coil_command_cache);
+        size_t write_index = 0;
+        while (write_index < mappings->size()) {
+            std::vector<uint8_t> block_values;
+            const int block_start = (*mappings)[write_index].address;
+            block_values.push_back(
+                drtw->queryChannelField(
+                    (*mappings)[write_index].portal,
+                    (*mappings)[write_index].channel,
+                    DARTWIC::API::ChannelField::VALUE,
+                    DARTWIC::API::ChannelValue{0.0}
+                ) != 0.0 ? 1 : 0
+            );
+            size_t block_end = write_index + 1;
+
+            while (block_end < mappings->size() &&
+                   (*mappings)[block_end].address == (*mappings)[block_end - 1].address + 1) {
+                block_values.push_back(
+                    drtw->queryChannelField(
+                        (*mappings)[block_end].portal,
+                        (*mappings)[block_end].channel,
+                        DARTWIC::API::ChannelField::VALUE,
+                        DARTWIC::API::ChannelValue{0.0}
+                    ) != 0.0 ? 1 : 0
+                );
+                ++block_end;
+            }
+
+            client.writeCoilBlock(block_start, block_values);
+            write_index = block_end;
         }
 
-        for (const auto& mapping : *mappings) {
-            const bool desired_value = drtw->queryChannelField(
-                mapping.portal,
-                mapping.channel,
-                DARTWIC::API::ChannelField::VALUE,
-                DARTWIC::API::ChannelValue{0.0}
-            ) != 0.0;
+        size_t read_index = 0;
+        while (read_index < mappings->size()) {
+            size_t block_end = read_index + 1;
+            while (block_end < mappings->size() && (*mappings)[block_end].address == (*mappings)[block_end - 1].address + 1) {
+                ++block_end;
+            }
 
-            const auto last_command = coil_command_cache->find(mapping.address);
-            if (last_command == coil_command_cache->end() || last_command->second != desired_value) {
-                if (client.writeCoil(mapping.address, desired_value)) {
-                    (*coil_command_cache)[mapping.address] = desired_value;
+            const int block_start = (*mappings)[read_index].address;
+            const int count = static_cast<int>(block_end - read_index);
+            const auto values = client.readCoilBlock(block_start, count);
+            if (values.has_value()) {
+                for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
+                    const auto& mapping = (*mappings)[read_index + offset];
+                    drtw->upsertChannelField(
+                        mapping.portal,
+                        mapping.state_channel,
+                        DARTWIC::API::ChannelField::VALUE,
+                        static_cast<double>((*values)[offset])
+                    );
                 }
             }
 
-            const auto value = client.readCoil(mapping.address);
-            if (!value.has_value()) {
-                continue;
-            }
-
-            //read state
-            drtw->upsertChannelField(
-                mapping.portal,
-                mapping.state_channel,
-                DARTWIC::API::ChannelField::VALUE,
-                static_cast<double>(*value)
-            );
-
+            read_index = block_end;
         }
     };
 

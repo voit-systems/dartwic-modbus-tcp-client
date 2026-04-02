@@ -31,8 +31,10 @@ public:
     std::optional<std::vector<int16_t>> readInputRegisterBlock(int start_address, int count);
     std::vector<std::optional<int16_t>> readInputRegisters(const std::vector<int>& addresses);
     bool writeCoil(int address, bool value);
+    bool writeCoilBlock(int start_address, const std::vector<uint8_t>& values);
 
     std::optional<uint8_t> readCoil(int address);
+    std::optional<std::vector<uint8_t>> readCoilBlock(int start_address, int count);
 
 private:
     bool connect();
