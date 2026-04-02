@@ -4,9 +4,11 @@
 
 #include "modbus_tcp_client_module.h"
 
+#include <algorithm>
 #include <atomic>
 #include <iostream>
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 #include <string>
 #include <vector>
@@ -17,6 +19,15 @@ namespace {
         int address = 0;
         std::string channel;
     };
+
+    struct ResolvedMapping {
+        int address = 0;
+        std::string portal;
+        std::string channel;
+        std::string state_channel;
+    };
+
+    using CoilCommandCache = std::unordered_map<int, bool>;
 
     std::string normalizeMappedChannelPath(std::string channel_path) {
         const auto slash_index = channel_path.find('/');
@@ -133,6 +144,48 @@ namespace {
 
         return mappings;
     }
+
+    std::vector<ResolvedMapping> resolveRegisterMappings(const nlohmann::json& arguments) {
+        std::vector<ResolvedMapping> resolved;
+        for (const auto& mapping : parseMappings(arguments)) {
+            const auto channel_path = splitChannelPath(mapping.channel);
+            if (!channel_path.has_value()) {
+                continue;
+            }
+
+            resolved.push_back(ResolvedMapping{
+                .address = mapping.address,
+                .portal = channel_path->first,
+                .channel = channel_path->second,
+                .state_channel = {}
+            });
+        }
+
+        std::sort(resolved.begin(), resolved.end(), [](const ResolvedMapping& lhs, const ResolvedMapping& rhs) {
+            return lhs.address < rhs.address;
+        });
+
+        return resolved;
+    }
+
+    std::vector<ResolvedMapping> resolveCoilMappings(const nlohmann::json& arguments) {
+        std::vector<ResolvedMapping> resolved;
+        for (const auto& mapping : parseCoilMappings(arguments)) {
+            const auto channel_path = splitChannelPath(mapping.channel);
+            if (!channel_path.has_value()) {
+                continue;
+            }
+
+            resolved.push_back(ResolvedMapping{
+                .address = mapping.address,
+                .portal = channel_path->first,
+                .channel = channel_path->second,
+                .state_channel = channel_path->second + "_state"
+            });
+        }
+
+        return resolved;
+    }
 }
 
 #ifdef _WIN32
@@ -148,8 +201,8 @@ ModbusTCPClientModule::ModbusTCPClientModule(YAML::Node cfg, DARTWIC::API::SDK_A
           instance_name_,
           getParameter<std::string>("server_ip"),
           getParameter<int>("server_port", 502),
-          static_cast<uint32_t>(getParameter<int>("tv_sec", 3)),
-          static_cast<uint32_t>(getParameter<int>("tv_usec", 0))) {
+          static_cast<uint32_t>(getParameter<int>("tv_sec", 0)),
+          static_cast<uint32_t>(getParameter<int>("tv_usec", 200000))) {
 
 }
 
@@ -183,35 +236,31 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         // SET CHANNEL AUTHORITY and STALE
         // go through each channel used by this task and set to observe only autority
         const std::string task_controller = "task:" + task_runtime.getPortalName() + "/" + task_runtime.getTaskName();
-        const auto mappings = parseMappings(task_runtime.getArguments());
+        const auto mappings = resolveRegisterMappings(task_runtime.getArguments());
+        task_runtime.setTypedRuntimeContext("resolved_register_mappings", std::make_shared<std::vector<ResolvedMapping>>(mappings));
         for (const auto& mapping : mappings) {
-            const auto channel_path = splitChannelPath(mapping.channel);
-            if (!channel_path.has_value()) {
-                continue;
-            }
-
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_path->second,
+                mapping.portal,
+                mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
                 std::string{"observe_only"}
             );
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_path->second,
+                mapping.portal,
+                mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_OWNER,
                 task_controller
             );
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_path->second,
+                mapping.portal,
+                mapping.channel,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
                 task_controller
             );
 
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_path->second,
+                mapping.portal,
+                mapping.channel,
                 DARTWIC::API::ChannelField::STALE_TIMEOUT,
                 2.0
             );
@@ -239,52 +288,62 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         }
 
         /// GO THROUGH MAPPINGS
-        const auto mappings = parseMappings(task_runtime.getArguments());
-        for (const auto& mapping : mappings) {
-            const auto value = client.readInputRegister(mapping.address);
-            if (!value.has_value()) {
-                continue;
+        auto mappings = task_runtime.getTypedRuntimeContext<std::vector<ResolvedMapping>>("resolved_register_mappings");
+        if (!mappings) {
+            mappings = std::make_shared<std::vector<ResolvedMapping>>(resolveRegisterMappings(task_runtime.getArguments()));
+            task_runtime.setTypedRuntimeContext("resolved_register_mappings", mappings);
+        }
+
+        size_t index = 0;
+        while (index < mappings->size()) {
+            size_t block_end = index + 1;
+            while (block_end < mappings->size() && (*mappings)[block_end].address == (*mappings)[block_end - 1].address + 1) {
+                ++block_end;
             }
 
-            const auto channel_path = splitChannelPath(mapping.channel);
-            if (!channel_path.has_value()) {
-                continue;
+            const int start_address = (*mappings)[index].address;
+            const int count = static_cast<int>(block_end - index);
+            const auto values = client.readInputRegisterBlock(start_address, count);
+            if (values.has_value()) {
+                for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
+                    const auto& mapping = (*mappings)[index + offset];
+                    drtw->upsertChannelField(
+                        mapping.portal,
+                        mapping.channel,
+                        DARTWIC::API::ChannelField::VALUE,
+                        static_cast<double>((*values)[offset])
+                    );
+                }
             }
 
-            drtw->upsertChannelField(
-                channel_path->first,
-                channel_path->second,
-                DARTWIC::API::ChannelField::VALUE,
-                static_cast<double>(*value)
-            );
+            index = block_end;
         }
     };
 
     read_task_type.on_end = [drtw](const DARTWIC::API::TaskTypeDefinition&, DARTWIC::API::TaskRuntime& task_runtime) {
         // SET CHANNEL AUTHORITY
         // set to free once done
-        const auto mappings = parseMappings(task_runtime.getArguments());
-        for (const auto& mapping : mappings) {
-            const auto channel_path = splitChannelPath(mapping.channel);
-            if (!channel_path.has_value()) {
-                continue;
-            }
+        auto mappings = task_runtime.getTypedRuntimeContext<std::vector<ResolvedMapping>>("resolved_register_mappings");
+        if (!mappings) {
+            mappings = std::make_shared<std::vector<ResolvedMapping>>(resolveRegisterMappings(task_runtime.getArguments()));
+        }
 
+        for (const auto& mapping : *mappings) {
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_path->second,
+                mapping.portal,
+                mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
                 std::string{"free"}
             );
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_path->second,
+                mapping.portal,
+                mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_OWNER,
                 std::string{""}
             );
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_path->second,
+                mapping.portal,
+                mapping.channel,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
                 std::string{""}
             );
@@ -315,40 +374,58 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         // SET CHANNEL AUTHORITY and STALE for coil states
         // go through each channel used by this task and set to observe only autority
         const std::string task_controller = "task:" + task_runtime.getPortalName() + "/" + task_runtime.getTaskName();
-        const auto mappings = parseMappings(task_runtime.getArguments());
+        const auto mappings = resolveCoilMappings(task_runtime.getArguments());
+        task_runtime.setTypedRuntimeContext("resolved_coil_mappings", std::make_shared<std::vector<ResolvedMapping>>(mappings));
+        task_runtime.setTypedRuntimeContext("coil_command_cache", std::make_shared<CoilCommandCache>());
         for (const auto& mapping : mappings) {
-            const auto channel_path = splitChannelPath(mapping.channel);
-            if (!channel_path.has_value()) {
-                continue;
-            }
 
-            std::string channel_state_path = channel_path->second+"_state";
-
+            //state channel
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_state_path,
+                mapping.portal,
+                mapping.state_channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
                 std::string{"observe_only"}
             );
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_state_path,
+                mapping.portal,
+                mapping.state_channel,
                 DARTWIC::API::ChannelField::CONTROL_OWNER,
                 task_controller
             );
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_state_path,
+                mapping.portal,
+                mapping.state_channel,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
                 task_controller
             );
 
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_state_path,
+                mapping.portal,
+                mapping.state_channel,
                 DARTWIC::API::ChannelField::STALE_TIMEOUT,
                 1.0
             );
+
+            //channel
+            drtw->upsertChannelField(
+                mapping.portal,
+                mapping.channel,
+                DARTWIC::API::ChannelField::CONTROL_POLICY,
+                std::string{"free"}
+            );
+            drtw->upsertChannelField(
+                mapping.portal,
+                mapping.channel,
+                DARTWIC::API::ChannelField::CONTROL_OWNER,
+                task_controller
+            );
+            drtw->upsertChannelField(
+                mapping.portal,
+                mapping.channel,
+                DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
+                task_controller
+            );
+
         }
 
     };
@@ -373,22 +450,32 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         }
 
         /// GO THROUGH MAPPINGS
-        const auto mappings = parseCoilMappings(task_runtime.getArguments());
-        for (const auto& mapping : mappings) {
-            const auto channel_path = splitChannelPath(mapping.channel);
-            if (!channel_path.has_value()) {
-                continue;
-            }
+        auto mappings = task_runtime.getTypedRuntimeContext<std::vector<ResolvedMapping>>("resolved_coil_mappings");
+        if (!mappings) {
+            mappings = std::make_shared<std::vector<ResolvedMapping>>(resolveCoilMappings(task_runtime.getArguments()));
+            task_runtime.setTypedRuntimeContext("resolved_coil_mappings", mappings);
+        }
 
-            const double channel_value = drtw->queryChannelField(
-                channel_path->first,
-                channel_path->second,
+        auto coil_command_cache = task_runtime.getTypedRuntimeContext<CoilCommandCache>("coil_command_cache");
+        if (!coil_command_cache) {
+            coil_command_cache = std::make_shared<CoilCommandCache>();
+            task_runtime.setTypedRuntimeContext("coil_command_cache", coil_command_cache);
+        }
+
+        for (const auto& mapping : *mappings) {
+            const bool desired_value = drtw->queryChannelField(
+                mapping.portal,
+                mapping.channel,
                 DARTWIC::API::ChannelField::VALUE,
                 DARTWIC::API::ChannelValue{0.0}
-            );
+            ) != 0.0;
 
-            //write coil
-            client.writeCoil(mapping.address, channel_value != 0.0);
+            const auto last_command = coil_command_cache->find(mapping.address);
+            if (last_command == coil_command_cache->end() || last_command->second != desired_value) {
+                if (client.writeCoil(mapping.address, desired_value)) {
+                    (*coil_command_cache)[mapping.address] = desired_value;
+                }
+            }
 
             const auto value = client.readCoil(mapping.address);
             if (!value.has_value()) {
@@ -397,8 +484,8 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
 
             //read state
             drtw->upsertChannelField(
-                channel_path->first,
-                channel_path->second+"_state",
+                mapping.portal,
+                mapping.state_channel,
                 DARTWIC::API::ChannelField::VALUE,
                 static_cast<double>(*value)
             );

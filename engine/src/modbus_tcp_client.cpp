@@ -10,6 +10,7 @@
 #include <modbus_tcp_client_module.h>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #ifdef _WIN32
     #include <WinSock2.h>
@@ -83,7 +84,6 @@ ModbusTCPClient::ModbusTCPClient(ModbusTCPClientModule* module,
       tv_usec_(tv_usec) {
 
     module_->dartwic->onLoop("modbus_connection_monitor_" + instance_name_, [this]() {
-
         // NOT CONNECTED - attempt connection
         if (!connected_) {
             connect();
@@ -93,6 +93,7 @@ ModbusTCPClient::ModbusTCPClient(ModbusTCPClientModule* module,
             checkConnection();
         }
 
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     });
 
 }
@@ -119,6 +120,9 @@ void ModbusTCPClient::checkConnection() {
     // ERROR - NOT CONNECTED
     if (rc == -1) {
         publishModbusConnectionError(module_, instance_name_, modbus_strerror(errno));
+        modbus_close(ctx_);
+        modbus_free(ctx_);
+        ctx_ = nullptr;
         setConnected(0.0);
 
     // CONNECTED - keep setting setconnected to 1.0
@@ -141,6 +145,28 @@ std::optional<int16_t> ModbusTCPClient::readInputRegister(int address) {
     }
 
     return static_cast<int16_t>(raw_value);
+}
+
+std::optional<std::vector<int16_t>> ModbusTCPClient::readInputRegisterBlock(int start_address, int count) {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (ctx_ == nullptr || !connected_.load() || count <= 0) {
+        return std::nullopt;
+    }
+
+    std::vector<uint16_t> raw_values(static_cast<size_t>(count), 0);
+    const int rc = modbus_read_input_registers(ctx_, start_address, count, raw_values.data());
+    if (rc == -1) {
+        publishModbusOperationError(module_, instance_name_, "read_input_register_block", modbus_strerror(errno));
+        return std::nullopt;
+    }
+
+    std::vector<int16_t> values;
+    values.reserve(static_cast<size_t>(count));
+    for (const uint16_t raw_value : raw_values) {
+        values.push_back(static_cast<int16_t>(raw_value));
+    }
+
+    return values;
 }
 
 std::vector<std::optional<int16_t>> ModbusTCPClient::readInputRegisters(const std::vector<int>& addresses) {
@@ -196,6 +222,12 @@ void ModbusTCPClient::setConnected(double connected_value) {
 
 bool ModbusTCPClient::connect() {
     std::lock_guard<std::mutex> lock(ctx_lock_);
+
+    if (ctx_ != nullptr) {
+        modbus_close(ctx_);
+        modbus_free(ctx_);
+        ctx_ = nullptr;
+    }
 
     /// CREATE TCP CONTEXT ///
     ctx_ = modbus_new_tcp(server_ip_.c_str(), server_port_);

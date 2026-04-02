@@ -28,6 +28,7 @@ public:
     bool isConnected() const;
 
     std::optional<int16_t> readInputRegister(int address);
+    std::optional<std::vector<int16_t>> readInputRegisterBlock(int start_address, int count);
     std::vector<std::optional<int16_t>> readInputRegisters(const std::vector<int>& addresses);
     bool writeCoil(int address, bool value);
 
