@@ -169,6 +169,22 @@ bool ModbusTCPClient::writeCoil(int address, bool value) {
     return true;
 }
 
+std::optional<uint8_t> ModbusTCPClient::readCoil(int address) {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (ctx_ == nullptr || !connected_.load()) {
+        return std::nullopt;
+    }
+
+    uint8_t raw_value = 0;
+    const int rc = modbus_read_bits(ctx_, address, 1, &raw_value);
+    if (rc == -1) {
+        publishModbusOperationError(module_, instance_name_, "read_coil", modbus_strerror(errno));
+        return std::nullopt;
+    }
+
+    return static_cast<uint8_t>(raw_value);
+}
+
 
 void ModbusTCPClient::setConnected(double connected_value) {
     const bool next_connected = connected_value != 0.0;

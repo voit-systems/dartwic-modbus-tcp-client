@@ -180,7 +180,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
     /// START ///
     read_task_type.on_start = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
 
-        // SET CHANNEL AUTHORITY
+        // SET CHANNEL AUTHORITY and STALE
         // go through each channel used by this task and set to observe only autority
         const std::string task_controller = "task:" + task_runtime.getPortalName() + "/" + task_runtime.getTaskName();
         const auto mappings = parseMappings(task_runtime.getArguments());
@@ -207,6 +207,13 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                 channel_path->second,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
                 task_controller
+            );
+
+            drtw->upsertChannelField(
+                channel_path->first,
+                channel_path->second,
+                DARTWIC::API::ChannelField::STALE_TIMEOUT,
+                2.0
             );
         }
     };
@@ -303,8 +310,47 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         {"mappings", nlohmann::json::array()}
     };
 
-    write_task_type.on_start = [](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
-        // nothing for now
+    write_task_type.on_start = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
+
+        // SET CHANNEL AUTHORITY and STALE for coil states
+        // go through each channel used by this task and set to observe only autority
+        const std::string task_controller = "task:" + task_runtime.getPortalName() + "/" + task_runtime.getTaskName();
+        const auto mappings = parseMappings(task_runtime.getArguments());
+        for (const auto& mapping : mappings) {
+            const auto channel_path = splitChannelPath(mapping.channel);
+            if (!channel_path.has_value()) {
+                continue;
+            }
+
+            std::string channel_state_path = channel_path->second+"_state";
+
+            drtw->upsertChannelField(
+                channel_path->first,
+                channel_state_path,
+                DARTWIC::API::ChannelField::CONTROL_POLICY,
+                std::string{"observe_only"}
+            );
+            drtw->upsertChannelField(
+                channel_path->first,
+                channel_state_path,
+                DARTWIC::API::ChannelField::CONTROL_OWNER,
+                task_controller
+            );
+            drtw->upsertChannelField(
+                channel_path->first,
+                channel_state_path,
+                DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
+                task_controller
+            );
+
+            drtw->upsertChannelField(
+                channel_path->first,
+                channel_state_path,
+                DARTWIC::API::ChannelField::STALE_TIMEOUT,
+                1.0
+            );
+        }
+
     };
 
     write_task_type.on_task = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
@@ -341,7 +387,22 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                 DARTWIC::API::ChannelValue{0.0}
             );
 
+            //write coil
             client.writeCoil(mapping.address, channel_value != 0.0);
+
+            const auto value = client.readCoil(mapping.address);
+            if (!value.has_value()) {
+                continue;
+            }
+
+            //read state
+            drtw->upsertChannelField(
+                channel_path->first,
+                channel_path->second+"_state",
+                DARTWIC::API::ChannelField::VALUE,
+                static_cast<double>(*value)
+            );
+
         }
     };
 
