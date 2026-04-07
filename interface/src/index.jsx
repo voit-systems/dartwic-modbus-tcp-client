@@ -14,23 +14,30 @@ function normalizeMappings(argumentsPayload, convertChannelValuePathToChannelNam
         }));
 }
 
-function normalizeCoilMappings(argumentsPayload, convertChannelValuePathToChannelName) {
+const writeRegisterTypes = [
+    { value: "coil", label: "COIL" },
+    { value: "holding_register", label: "HOLDING REGISTER" }
+];
+
+function normalizeWriteMappings(argumentsPayload, convertChannelValuePathToChannelName) {
     if (argumentsPayload && Array.isArray(argumentsPayload.mappings)) {
         return argumentsPayload.mappings
             .filter((item) => item && typeof item === "object")
             .map((item, index) => ({
-                id: `coil-mapping-${index}-${item.coil || ""}-${item.channel || ""}`,
-                coil: Number.isFinite(Number(item.coil)) ? String(item.coil) : "",
+                id: `write-mapping-${index}-${item.register || ""}-${item.channel || ""}`,
+                registerType: item.register_type === "holding_register" ? "holding_register" : "coil",
+                register: Number.isFinite(Number(item.register)) ? String(item.register) : "",
                 channel: typeof item.channel === "string"
                     ? convertChannelValuePathToChannelName(item.channel)
                     : ""
             }));
     }
 
-    if (argumentsPayload && (argumentsPayload.coil != null || argumentsPayload.channel != null)) {
+    if (argumentsPayload && (argumentsPayload.register != null || argumentsPayload.channel != null)) {
         return [{
-            id: `coil-mapping-0-${argumentsPayload.coil || ""}-${argumentsPayload.channel || ""}`,
-            coil: Number.isFinite(Number(argumentsPayload.coil)) ? String(argumentsPayload.coil) : "",
+            id: `write-mapping-0-${argumentsPayload.register || ""}-${argumentsPayload.channel || ""}`,
+            registerType: argumentsPayload.register_type === "holding_register" ? "holding_register" : "coil",
+            register: Number.isFinite(Number(argumentsPayload.register)) ? String(argumentsPayload.register) : "",
             channel: typeof argumentsPayload.channel === "string"
                 ? convertChannelValuePathToChannelName(argumentsPayload.channel)
                 : ""
@@ -40,63 +47,9 @@ function normalizeCoilMappings(argumentsPayload, convertChannelValuePathToChanne
     return [];
 }
 
-const mappingScrollbarClassName = "modbus-shadcn-scrollbar";
-const mappingScrollbarStyleId = "modbus-shadcn-scrollbar-styles";
-
-function ensureMappingScrollbarStyles() {
-    if (typeof document === "undefined" || document.getElementById(mappingScrollbarStyleId)) {
-        return;
-    }
-
-    const style = document.createElement("style");
-    style.id = mappingScrollbarStyleId;
-    style.textContent = `
-        .${mappingScrollbarClassName} {
-            scrollbar-width: thin;
-            scrollbar-color: hsl(var(--foreground) / 0.7) transparent;
-        }
-
-        .${mappingScrollbarClassName}::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-            background: transparent;
-            -webkit-appearance: none;
-        }
-
-        .${mappingScrollbarClassName}::-webkit-scrollbar-track {
-            background: transparent;
-            border: none;
-            box-shadow: none;
-            -webkit-appearance: none;
-        }
-
-        .${mappingScrollbarClassName}::-webkit-scrollbar-track-piece {
-            background: transparent;
-            border: none;
-        }
-
-        .${mappingScrollbarClassName}::-webkit-scrollbar-thumb {
-            border-radius: 9999px;
-            background: hsl(var(--foreground) / 0.7);
-            border: none;
-            box-shadow: none;
-        }
-
-        .${mappingScrollbarClassName}::-webkit-scrollbar-thumb:hover {
-            background: hsl(var(--foreground) / 0.85);
-        }
-
-        .${mappingScrollbarClassName}::-webkit-scrollbar-corner {
-            background: transparent;
-        }
-    `;
-
-    document.head.appendChild(style);
-}
-
 export const moduleUiPluginMeta = {
     moduleName: "modbus_tcp_client",
-    taskTypes: ["modbus.read_input_registers", "modbus.write_coil"]
+    taskTypes: ["modbus.read_input_registers", "modbus.write"]
 };
 
 export function createModuleUiPlugin(host) {
@@ -123,8 +76,8 @@ export function createModuleUiPlugin(host) {
     } = host.helpers;
 
     function ModbusTaskSecondaryGui({ task }) {
-        if (task.task_type === "modbus.write_coil") {
-            const mappings = normalizeCoilMappings(task.arguments, convertChannelValuePathToChannelName);
+        if (task.task_type === "modbus.write") {
+            const mappings = normalizeWriteMappings(task.arguments, convertChannelValuePathToChannelName);
             const instanceName = task.arguments?.module_instance_name || "UNBOUND";
             const previewMappings = mappings.slice(0, 3);
             const hiddenMappingCount = Math.max(mappings.length - previewMappings.length, 0);
@@ -156,7 +109,7 @@ export function createModuleUiPlugin(host) {
                                         key={mapping.id}
                                         className="truncate rounded-md border bg-muted px-2 py-1"
                                     >
-                                        {mapping.coil} {"->"} {mapping.channel}
+                                        {writeRegisterTypes.find((item) => item.value === mapping.registerType)?.label || "COIL"} {mapping.register} {"->"} {mapping.channel}
                                     </div>
                                 ))}
                                 {hiddenMappingCount > 0 ? (
@@ -221,15 +174,33 @@ export function createModuleUiPlugin(host) {
         );
     }
 
-    function CoilMappingRow({ mapping, onChange, onRemove, removeDisabled }) {
+    function WriteMappingRow({ mapping, onChange, onRemove, removeDisabled }) {
         return (
-            <div className="grid grid-cols-1 gap-2 rounded-md border p-3 md:grid-cols-[120px_minmax(0,1fr)_auto]">
+            <div
+                className="grid items-center gap-2 rounded-md border p-3"
+                style={{ gridTemplateColumns: "180px 120px minmax(0, 1fr) auto" }}
+            >
+                <Select
+                    value={mapping.registerType}
+                    onValueChange={(value) => onChange({ ...mapping, registerType: value })}
+                >
+                    <SelectTrigger className="w-full">
+                        <SelectValue placeholder="REGISTER TYPE" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {writeRegisterTypes.map((registerType) => (
+                            <SelectItem key={registerType.value} value={registerType.value}>
+                                {registerType.label}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
                 <Input
                     type="number"
                     min="0"
-                    placeholder="COIL"
-                    value={mapping.coil}
-                    onChange={(event) => onChange({ ...mapping, coil: event.target.value })}
+                    placeholder="ADDRESS"
+                    value={mapping.register}
+                    onChange={(event) => onChange({ ...mapping, register: event.target.value })}
                 />
                 <ChannelComboBox
                     mode="read"
@@ -251,29 +222,25 @@ export function createModuleUiPlugin(host) {
         );
     }
 
-    function ModbusWriteCoilTaskDetailGui({ task, operation, onSaved, onClose }) {
+    function ModbusWriteTaskDetailGui({ task, operation, onSaved, onClose }) {
         const mappingIdRef = useRef(0);
         const [moduleInstances, setModuleInstances] = useState([]);
         const [selectedInstance, setSelectedInstance] = useState(task.arguments?.module_instance_name || "");
         const [mappings, setMappings] = useState(() =>
-            normalizeCoilMappings(task.arguments, convertChannelValuePathToChannelName).map((mapping) => ({
+            normalizeWriteMappings(task.arguments, convertChannelValuePathToChannelName).map((mapping) => ({
                 ...mapping,
-                id: `coil-mapping-${mappingIdRef.current++}`
+                id: `write-mapping-${mappingIdRef.current++}`
             }))
         );
         const [errorMessage, setErrorMessage] = useState("");
         const [isSaving, setIsSaving] = useState(false);
 
         useEffect(() => {
-            ensureMappingScrollbarStyles();
-        }, []);
-
-        useEffect(() => {
             setSelectedInstance(task.arguments?.module_instance_name || "");
             setMappings(
-                normalizeCoilMappings(task.arguments, convertChannelValuePathToChannelName).map((mapping) => ({
+                normalizeWriteMappings(task.arguments, convertChannelValuePathToChannelName).map((mapping) => ({
                     ...mapping,
-                    id: `coil-mapping-${mappingIdRef.current++}`
+                    id: `write-mapping-${mappingIdRef.current++}`
                 }))
             );
             setErrorMessage("");
@@ -309,10 +276,11 @@ export function createModuleUiPlugin(host) {
         async function saveTask() {
             const cleanedMappings = mappings
                 .map((mapping) => ({
-                    coil: Number(mapping.coil),
+                    register_type: mapping.registerType === "holding_register" ? "holding_register" : "coil",
+                    register: Number(mapping.register),
                     channel: mapping.channel.trim()
                 }))
-                .filter((mapping) => Number.isFinite(mapping.coil) && mapping.channel !== "");
+                .filter((mapping) => Number.isFinite(mapping.register) && mapping.channel !== "");
 
             if (!selectedInstance) {
                 setErrorMessage("SELECT A MODBUS MODULE INSTANCE.");
@@ -320,7 +288,7 @@ export function createModuleUiPlugin(host) {
             }
 
             if (cleanedMappings.length === 0) {
-                setErrorMessage("ADD AT LEAST ONE COIL/CHANNEL MAPPING.");
+                setErrorMessage("ADD AT LEAST ONE REGISTER/CHANNEL MAPPING.");
                 return;
             }
 
@@ -331,7 +299,7 @@ export function createModuleUiPlugin(host) {
                 const result = await operation("dartwic/create-task", {
                     portal_name: task.portal,
                     task_name: task.name,
-                    task_type: task.task_type,
+                    task_type: "modbus.write",
                     arguments: {
                         module_instance_name: selectedInstance,
                         mappings: cleanedMappings
@@ -358,9 +326,9 @@ export function createModuleUiPlugin(host) {
         return (
             <>
                 <DialogHeader>
-                    <DialogTitle>MODBUS COIL WRITE TASK</DialogTitle>
+                    <DialogTitle>MODBUS WRITE TASK</DialogTitle>
                     <DialogDescription>
-                        BIND THIS TASK TO A MODBUS MODULE INSTANCE AND WRITE A DARTWIC CHANNEL VALUE TO A COIL.
+                        BIND THIS TASK TO A MODBUS MODULE INSTANCE AND WRITE DARTWIC CHANNEL VALUES TO COILS OR HOLDING REGISTERS.
                     </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
@@ -386,8 +354,9 @@ export function createModuleUiPlugin(host) {
                                 variant="outline"
                                 onClick={() =>
                                     setMappings((current) => current.concat([{
-                                        id: `coil-mapping-${mappingIdRef.current++}`,
-                                        coil: "",
+                                        id: `write-mapping-${mappingIdRef.current++}`,
+                                        registerType: "coil",
+                                        register: "",
                                         channel: ""
                                     }]))
                                 }
@@ -395,14 +364,14 @@ export function createModuleUiPlugin(host) {
                                 ADD
                             </Button>
                         </div>
-                        <div className={`max-h-72 space-y-2 overflow-y-auto ${mappingScrollbarClassName}`}>
+                        <div className="max-h-72 space-y-2 overflow-y-auto">
                             {mappings.length === 0 ? (
                                 <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
                                     NO MAPPINGS CONFIGURED.
                                 </div>
                             ) : (
                                 mappings.map((mapping, index) => (
-                                    <CoilMappingRow
+                                    <WriteMappingRow
                                         key={mapping.id}
                                         mapping={mapping}
                                         onChange={(nextMapping) =>
@@ -443,7 +412,10 @@ export function createModuleUiPlugin(host) {
 
     function MappingRow({ mapping, onChange, onRemove, removeDisabled }) {
         return (
-            <div className="grid grid-cols-1 gap-2 rounded-md border p-3 md:grid-cols-[120px_minmax(0,1fr)_auto]">
+            <div
+                className="grid items-center gap-2 rounded-md border p-3"
+                style={{ gridTemplateColumns: "120px minmax(0, 1fr) auto" }}
+            >
                 <Input
                     type="number"
                     min="0"
@@ -483,10 +455,6 @@ export function createModuleUiPlugin(host) {
         );
         const [errorMessage, setErrorMessage] = useState("");
         const [isSaving, setIsSaving] = useState(false);
-
-        useEffect(() => {
-            ensureMappingScrollbarStyles();
-        }, []);
 
         useEffect(() => {
             setSelectedInstance(task.arguments?.module_instance_name || "");
@@ -615,7 +583,7 @@ export function createModuleUiPlugin(host) {
                                 ADD
                             </Button>
                         </div>
-                        <div className={`max-h-72 space-y-2 overflow-y-auto ${mappingScrollbarClassName}`}>
+                        <div className="max-h-72 space-y-2 overflow-y-auto">
                             {mappings.length === 0 ? (
                                 <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
                                     NO MAPPINGS CONFIGURED.
@@ -780,8 +748,8 @@ export function createModuleUiPlugin(host) {
         ModuleConfigPage: ModbusModuleConfigPage,
         TaskSecondaryGui: ModbusTaskSecondaryGui,
         TaskDetailGui: (props) => (
-            props.task?.task_type === "modbus.write_coil"
-                ? <ModbusWriteCoilTaskDetailGui {...props} />
+            props.task?.task_type === "modbus.write"
+                ? <ModbusWriteTaskDetailGui {...props} />
                 : <ModbusTaskDetailGui {...props} />
         )
     };

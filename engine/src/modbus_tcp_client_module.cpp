@@ -6,17 +6,27 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
+#include <cstddef>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <unordered_set>
 #include <string>
 #include <vector>
 
 namespace {
 
+    enum class RegisterType {
+        Coil,
+        HoldingRegister
+    };
+
     struct Mapping {
         int address = 0;
         std::string channel;
+        RegisterType register_type = RegisterType::Coil;
     };
 
     struct ResolvedMapping {
@@ -24,7 +34,59 @@ namespace {
         std::string portal;
         std::string channel;
         std::string state_channel;
+        RegisterType register_type = RegisterType::Coil;
     };
+
+    struct WriteMappingBlock {
+        RegisterType register_type = RegisterType::Coil;
+        int start_address = 0;
+        std::vector<ResolvedMapping> mappings;
+        std::vector<uint8_t> coil_values;
+        std::vector<uint16_t> holding_register_values;
+    };
+
+    struct ReadMappingBlock {
+        int start_address = 0;
+        std::vector<ResolvedMapping> mappings;
+    };
+
+    std::optional<RegisterType> parseRegisterType(const nlohmann::json& item) {
+        if (item.contains("register_type") && item["register_type"].is_string()) {
+            const auto register_type = item["register_type"].get<std::string>();
+            if (register_type == "coil") {
+                return RegisterType::Coil;
+            }
+
+            if (register_type == "holding_register" || register_type == "holding_registers") {
+                return RegisterType::HoldingRegister;
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    std::string registerTypeToString(RegisterType register_type) {
+        switch (register_type) {
+            case RegisterType::HoldingRegister:
+                return "holding_register";
+            case RegisterType::Coil:
+            default:
+                return "coil";
+        }
+    }
+
+    uint16_t channelValueToRegister(double value) {
+        if (value <= 0.0) {
+            return 0;
+        }
+
+        if (value >= static_cast<double>((std::numeric_limits<uint16_t>::max)())) {
+            return (std::numeric_limits<uint16_t>::max)();
+        }
+
+        return static_cast<uint16_t>(value);
+    }
+
 
     std::string normalizeMappedChannelPath(std::string channel_path) {
         const auto slash_index = channel_path.find('/');
@@ -102,7 +164,7 @@ namespace {
         return mappings;
     }
 
-    std::vector<Mapping> parseCoilMappings(const nlohmann::json& arguments) {
+    std::vector<Mapping> parseWriteMappings(const nlohmann::json& arguments) {
         std::vector<Mapping> mappings;
         if (!arguments.is_object()) {
             return mappings;
@@ -114,7 +176,7 @@ namespace {
                     continue;
                 }
 
-                if (!item.contains("coil") || !item["coil"].is_number_integer()) {
+                if (!item.contains("register") || !item["register"].is_number_integer()) {
                     continue;
                 }
 
@@ -122,20 +184,32 @@ namespace {
                     continue;
                 }
 
+                const auto register_type = parseRegisterType(item);
+                if (!register_type.has_value()) {
+                    continue;
+                }
+
                 Mapping mapping;
-                mapping.address = item["coil"].get<int>();
+                mapping.address = item["register"].get<int>();
                 mapping.channel = normalizeMappedChannelPath(item["channel"].get<std::string>());
+                mapping.register_type = *register_type;
                 mappings.push_back(std::move(mapping));
             }
 
             return mappings;
         }
 
-        if (arguments.contains("coil") && arguments["coil"].is_number_integer() &&
+        if (arguments.contains("register") && arguments["register"].is_number_integer() &&
             arguments.contains("channel") && arguments["channel"].is_string()) {
+            const auto register_type = parseRegisterType(arguments);
+            if (!register_type.has_value()) {
+                return mappings;
+            }
+
             Mapping mapping;
-            mapping.address = arguments["coil"].get<int>();
+            mapping.address = arguments["register"].get<int>();
             mapping.channel = normalizeMappedChannelPath(arguments["channel"].get<std::string>());
+            mapping.register_type = *register_type;
             mappings.push_back(std::move(mapping));
         }
 
@@ -165,9 +239,9 @@ namespace {
         return resolved;
     }
 
-    std::vector<ResolvedMapping> resolveCoilMappings(const nlohmann::json& arguments) {
+    std::vector<ResolvedMapping> resolveWriteMappings(const nlohmann::json& arguments) {
         std::vector<ResolvedMapping> resolved;
-        for (const auto& mapping : parseCoilMappings(arguments)) {
+        for (const auto& mapping : parseWriteMappings(arguments)) {
             const auto channel_path = splitChannelPath(mapping.channel);
             if (!channel_path.has_value()) {
                 continue;
@@ -177,15 +251,73 @@ namespace {
                 .address = mapping.address,
                 .portal = channel_path->first,
                 .channel = channel_path->second,
-                .state_channel = channel_path->second + "_state"
+                .state_channel = channel_path->second + "_state",
+                .register_type = mapping.register_type
             });
         }
 
         std::sort(resolved.begin(), resolved.end(), [](const ResolvedMapping& lhs, const ResolvedMapping& rhs) {
+            if (lhs.register_type != rhs.register_type) {
+                return registerTypeToString(lhs.register_type) < registerTypeToString(rhs.register_type);
+            }
+
             return lhs.address < rhs.address;
         });
 
         return resolved;
+    }
+
+    std::vector<ReadMappingBlock> buildReadMappingBlocks(const std::vector<ResolvedMapping>& mappings) {
+        std::vector<ReadMappingBlock> blocks;
+
+        size_t index = 0;
+        while (index < mappings.size()) {
+            const int block_start = mappings[index].address;
+            size_t block_end = index + 1;
+
+            while (block_end < mappings.size() && mappings[block_end].address == mappings[block_end - 1].address + 1) {
+                ++block_end;
+            }
+
+            ReadMappingBlock block;
+            block.start_address = block_start;
+            block.mappings.assign(mappings.begin() + static_cast<std::ptrdiff_t>(index), mappings.begin() + static_cast<std::ptrdiff_t>(block_end));
+            blocks.push_back(std::move(block));
+            index = block_end;
+        }
+
+        return blocks;
+    }
+
+    std::vector<WriteMappingBlock> buildWriteMappingBlocks(const std::vector<ResolvedMapping>& mappings) {
+        std::vector<WriteMappingBlock> blocks;
+
+        size_t index = 0;
+        while (index < mappings.size()) {
+            const RegisterType block_type = mappings[index].register_type;
+            const int block_start = mappings[index].address;
+            size_t block_end = index + 1;
+
+            while (block_end < mappings.size() &&
+                   mappings[block_end].register_type == block_type &&
+                   mappings[block_end].address == mappings[block_end - 1].address + 1) {
+                ++block_end;
+            }
+
+            WriteMappingBlock block;
+            block.register_type = block_type;
+            block.start_address = block_start;
+            block.mappings.assign(mappings.begin() + static_cast<std::ptrdiff_t>(index), mappings.begin() + static_cast<std::ptrdiff_t>(block_end));
+            if (block_type == RegisterType::HoldingRegister) {
+                block.holding_register_values.resize(block.mappings.size(), 0);
+            } else {
+                block.coil_values.resize(block.mappings.size(), 0);
+            }
+            blocks.push_back(std::move(block));
+            index = block_end;
+        }
+
+        return blocks;
     }
 }
 
@@ -239,6 +371,15 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         const std::string task_controller = "task:" + task_runtime.getPortalName() + "/" + task_runtime.getTaskName();
         const auto mappings = resolveRegisterMappings(task_runtime.getArguments());
         task_runtime.setTypedRuntimeContext("resolved_register_mappings", std::make_shared<std::vector<ResolvedMapping>>(mappings));
+        task_runtime.setTypedRuntimeContext("read_mapping_blocks", std::make_shared<std::vector<ReadMappingBlock>>(buildReadMappingBlocks(mappings)));
+
+        const std::string instance_name = task_runtime.getArguments().value("module_instance_name", std::string{""});
+        auto module = drtw->getModuleInstance(instance_name);
+        auto modbusModule = std::dynamic_pointer_cast<ModbusTCPClientModule>(module);
+        if (modbusModule) {
+            task_runtime.setTypedRuntimeContext("read_modbus_module", modbusModule);
+        }
+
         for (const auto& mapping : mappings) {
             drtw->upsertChannelField(
                 mapping.portal,
@@ -270,12 +411,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
 
     /// TASK ///
     read_task_type.on_task = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
-        /// GET MODULE INSTANCE AND CLIENT
-        std::string instance_name = task_runtime.getArguments()["module_instance_name"];
-        auto module = drtw->getModuleInstance(instance_name);
-
-        // cast
-        auto modbusModule = std::dynamic_pointer_cast<ModbusTCPClientModule>(module);
+        auto modbusModule = task_runtime.getTypedRuntimeContext<ModbusTCPClientModule>("read_modbus_module");
         if (!modbusModule) {
             return;
         }
@@ -288,26 +424,17 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
             return;
         }
 
-        /// GO THROUGH MAPPINGS
-        auto mappings = task_runtime.getTypedRuntimeContext<std::vector<ResolvedMapping>>("resolved_register_mappings");
-        if (!mappings) {
-            mappings = std::make_shared<std::vector<ResolvedMapping>>(resolveRegisterMappings(task_runtime.getArguments()));
-            task_runtime.setTypedRuntimeContext("resolved_register_mappings", mappings);
+        auto blocks = task_runtime.getTypedRuntimeContext<std::vector<ReadMappingBlock>>("read_mapping_blocks");
+        if (!blocks) {
+            return;
         }
 
-        size_t index = 0;
-        while (index < mappings->size()) {
-            size_t block_end = index + 1;
-            while (block_end < mappings->size() && (*mappings)[block_end].address == (*mappings)[block_end - 1].address + 1) {
-                ++block_end;
-            }
-
-            const int start_address = (*mappings)[index].address;
-            const int count = static_cast<int>(block_end - index);
-            const auto values = client.readInputRegisterBlock(start_address, count);
+        for (const auto& block : *blocks) {
+            const int count = static_cast<int>(block.mappings.size());
+            const auto values = client.readInputRegisterBlock(block.start_address, count);
             if (values.has_value()) {
                 for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
-                    const auto& mapping = (*mappings)[index + offset];
+                    const auto& mapping = block.mappings[offset];
                     drtw->upsertChannelField(
                         mapping.portal,
                         mapping.channel,
@@ -316,8 +443,6 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                     );
                 }
             }
-
-            index = block_end;
         }
     };
 
@@ -361,7 +486,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
 
     ///// WRITE TASK /////
     DARTWIC::API::TaskTypeDefinition write_task_type;
-    write_task_type.metadata.task_type = "modbus.write_coil";
+    write_task_type.metadata.task_type = "modbus.write";
     write_task_type.metadata.icon_url = "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg";
     write_task_type.metadata.exposed_from = "modbus_tcp_client";
     write_task_type.metadata.expected_module_registry = "modbus_tcp_client";
@@ -372,11 +497,20 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
 
     write_task_type.on_start = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
 
-        // SET CHANNEL AUTHORITY and STALE for coil states
+        // SET CHANNEL AUTHORITY and STALE for write state channels
         // go through each channel used by this task and set to observe only autority
         const std::string task_controller = "task:" + task_runtime.getPortalName() + "/" + task_runtime.getTaskName();
-        const auto mappings = resolveCoilMappings(task_runtime.getArguments());
-        task_runtime.setTypedRuntimeContext("resolved_coil_mappings", std::make_shared<std::vector<ResolvedMapping>>(mappings));
+        const auto mappings = resolveWriteMappings(task_runtime.getArguments());
+        task_runtime.setTypedRuntimeContext("resolved_write_mappings", std::make_shared<std::vector<ResolvedMapping>>(mappings));
+        task_runtime.setTypedRuntimeContext("write_mapping_blocks", std::make_shared<std::vector<WriteMappingBlock>>(buildWriteMappingBlocks(mappings)));
+
+        const std::string instance_name = task_runtime.getArguments().value("module_instance_name", std::string{""});
+        auto module = drtw->getModuleInstance(instance_name);
+        auto modbusModule = std::dynamic_pointer_cast<ModbusTCPClientModule>(module);
+        if (modbusModule) {
+            task_runtime.setTypedRuntimeContext("write_modbus_module", modbusModule);
+        }
+
         for (const auto& mapping : mappings) {
 
             //state channel
@@ -403,7 +537,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                 mapping.portal,
                 mapping.state_channel,
                 DARTWIC::API::ChannelField::STALE_TIMEOUT,
-                1.0
+                1.00
             );
 
             //channel
@@ -431,12 +565,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
     };
 
     write_task_type.on_task = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
-        /// GET MODULE INSTANCE AND CLIENT
-        std::string instance_name = task_runtime.getArguments()["module_instance_name"];
-        auto module = drtw->getModuleInstance(instance_name);
-
-        // cast
-        auto modbusModule = std::dynamic_pointer_cast<ModbusTCPClientModule>(module);
+        auto modbusModule = task_runtime.getTypedRuntimeContext<ModbusTCPClientModule>("write_modbus_module");
         if (!modbusModule) {
             return;
         }
@@ -449,67 +578,66 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
             return;
         }
 
-        /// GO THROUGH MAPPINGS
-        auto mappings = task_runtime.getTypedRuntimeContext<std::vector<ResolvedMapping>>("resolved_coil_mappings");
-        if (!mappings) {
-            mappings = std::make_shared<std::vector<ResolvedMapping>>(resolveCoilMappings(task_runtime.getArguments()));
-            task_runtime.setTypedRuntimeContext("resolved_coil_mappings", mappings);
+        auto blocks = task_runtime.getTypedRuntimeContext<std::vector<WriteMappingBlock>>("write_mapping_blocks");
+        if (!blocks) {
+            return;
         }
 
-        size_t write_index = 0;
-        while (write_index < mappings->size()) {
-            std::vector<uint8_t> block_values;
-            const int block_start = (*mappings)[write_index].address;
-            block_values.push_back(
-                drtw->queryChannelField(
-                    (*mappings)[write_index].portal,
-                    (*mappings)[write_index].channel,
-                    DARTWIC::API::ChannelField::VALUE,
-                    DARTWIC::API::ChannelValue{0.0}
-                ) != 0.0 ? 1 : 0
-            );
-            size_t block_end = write_index + 1;
-
-            while (block_end < mappings->size() &&
-                   (*mappings)[block_end].address == (*mappings)[block_end - 1].address + 1) {
-                block_values.push_back(
-                    drtw->queryChannelField(
-                        (*mappings)[block_end].portal,
-                        (*mappings)[block_end].channel,
+        for (auto& block : *blocks) {
+            if (block.register_type == RegisterType::HoldingRegister) {
+                for (size_t index = 0; index < block.mappings.size(); ++index) {
+                    const auto& mapping = block.mappings[index];
+                    block.holding_register_values[index] = channelValueToRegister(drtw->queryChannelField(
+                        mapping.portal,
+                        mapping.channel,
                         DARTWIC::API::ChannelField::VALUE,
                         DARTWIC::API::ChannelValue{0.0}
-                    ) != 0.0 ? 1 : 0
-                );
-                ++block_end;
+                    ));
+                }
+                client.writeHoldingRegisterBlock(block.start_address, block.holding_register_values);
+            } else {
+                for (size_t index = 0; index < block.mappings.size(); ++index) {
+                    const auto& mapping = block.mappings[index];
+                    block.coil_values[index] = drtw->queryChannelField(
+                        mapping.portal,
+                        mapping.channel,
+                        DARTWIC::API::ChannelField::VALUE,
+                        DARTWIC::API::ChannelValue{0.0}
+                    ) != 0.0 ? 1 : 0;
+                }
+                client.writeCoilBlock(block.start_address, block.coil_values);
             }
-
-            client.writeCoilBlock(block_start, block_values);
-            write_index = block_end;
         }
 
-        size_t read_index = 0;
-        while (read_index < mappings->size()) {
-            size_t block_end = read_index + 1;
-            while (block_end < mappings->size() && (*mappings)[block_end].address == (*mappings)[block_end - 1].address + 1) {
-                ++block_end;
-            }
-
-            const int block_start = (*mappings)[read_index].address;
-            const int count = static_cast<int>(block_end - read_index);
-            const auto values = client.readCoilBlock(block_start, count);
-            if (values.has_value()) {
-                for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
-                    const auto& mapping = (*mappings)[read_index + offset];
-                    drtw->upsertChannelField(
-                        mapping.portal,
-                        mapping.state_channel,
-                        DARTWIC::API::ChannelField::VALUE,
-                        static_cast<double>((*values)[offset])
-                    );
+        for (const auto& block : *blocks) {
+            const int count = static_cast<int>(block.mappings.size());
+            if (block.register_type == RegisterType::HoldingRegister) {
+                const auto values = client.readHoldingRegisterBlock(block.start_address, count);
+                if (values.has_value()) {
+                    for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
+                        const auto& mapping = block.mappings[offset];
+                        drtw->upsertChannelField(
+                            mapping.portal,
+                            mapping.state_channel,
+                            DARTWIC::API::ChannelField::VALUE,
+                            static_cast<double>((*values)[offset])
+                        );
+                    }
+                }
+            } else {
+                const auto values = client.readCoilBlock(block.start_address, count);
+                if (values.has_value()) {
+                    for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
+                        const auto& mapping = block.mappings[offset];
+                        drtw->upsertChannelField(
+                            mapping.portal,
+                            mapping.state_channel,
+                            DARTWIC::API::ChannelField::VALUE,
+                            static_cast<double>((*values)[offset])
+                        );
+                    }
                 }
             }
-
-            read_index = block_end;
         }
     };
 

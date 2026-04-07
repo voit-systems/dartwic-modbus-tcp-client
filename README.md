@@ -7,7 +7,7 @@ Modbus TCP Client package for DARTWIC.
 This package provides a Modbus TCP engine module that manages Modbus client connections and exposes one task type:
 
 - `modbus.read_input_registers`
-- `modbus.write_coil`
+- `modbus.write`
 
 Use it by first creating a `modbus_tcp_client` module instance, configuring its connection settings, and then attaching `modbus.read_input_registers` tasks to that instance.
 
@@ -32,17 +32,18 @@ Each mapping contains:
 - `register`: The Modbus input register address to read
 - `channel`: The DARTWIC channel name to publish that register value to
 
-The `modbus.write_coil` task expects:
+The `modbus.write` task expects:
 
 - `module_instance_name`: The target Modbus TCP client module instance to use
-- `mappings`: A list of coil-to-channel mappings
+- `mappings`: A list of register-to-channel mappings
 
 Each mapping contains:
 
-- `coil`: The Modbus coil address to write
-- `channel`: The DARTWIC channel whose current value should be written to the coil
+- `register_type`: The Modbus register type to write. Supported values are `coil` and `holding_register`
+- `register`: The Modbus coil or holding register address to write
+- `channel`: The DARTWIC channel whose current value should be written to the target register
 
-The coil write task treats any non-zero channel value as `true` and writes `0` as `false`.
+Coil mappings treat any non-zero channel value as `true` and write `0` as `false`. Holding-register mappings write the channel value as a 16-bit unsigned register value.
 
 In practice, a typical setup flow is:
 
@@ -51,7 +52,7 @@ In practice, a typical setup flow is:
 3. Create a `modbus.read_input_registers` task.
 4. Select the module instance in `module_instance_name`.
 5. Add one or more `mappings` entries from Modbus input registers to DARTWIC channels.
-6. For coil output control, create a `modbus.write_coil` task and add one or more coil-to-channel mappings.
+6. For output control, create a `modbus.write` task and add one or more coil or holding-register mappings.
 
 ## Build Layout
 

@@ -1,6 +1,6 @@
 name: "modbus_tcp_client" #must match dll name and folder name
 title: "Modbus TCP Client"
-description: "Creates a Modbus TCP client instance that task types can use to read device input registers."
+description: "Creates a Modbus TCP client instance that task types can use to read input registers and write coils or holding registers."
 author: "Voit Systems"
 version: "1.1"
 icon_image_src: "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg"

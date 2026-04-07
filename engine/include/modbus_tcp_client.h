@@ -7,6 +7,7 @@
 
 #include <modbus/modbus.h>
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -35,6 +36,8 @@ public:
 
     std::optional<uint8_t> readCoil(int address);
     std::optional<std::vector<uint8_t>> readCoilBlock(int start_address, int count);
+    bool writeHoldingRegisterBlock(int start_address, const std::vector<uint16_t>& values);
+    std::optional<std::vector<uint16_t>> readHoldingRegisterBlock(int start_address, int count);
 
 private:
     bool connect();

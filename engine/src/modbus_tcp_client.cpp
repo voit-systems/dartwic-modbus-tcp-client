@@ -242,6 +242,37 @@ std::optional<std::vector<uint8_t>> ModbusTCPClient::readCoilBlock(int start_add
     return values;
 }
 
+bool ModbusTCPClient::writeHoldingRegisterBlock(int start_address, const std::vector<uint16_t>& values) {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (ctx_ == nullptr || !connected_.load() || values.empty()) {
+        return false;
+    }
+
+    const int rc = modbus_write_registers(ctx_, start_address, static_cast<int>(values.size()), values.data());
+    if (rc == -1) {
+        publishModbusOperationError(module_, instance_name_, "write_holding_register_block", modbus_strerror(errno));
+        return false;
+    }
+
+    return true;
+}
+
+std::optional<std::vector<uint16_t>> ModbusTCPClient::readHoldingRegisterBlock(int start_address, int count) {
+    std::lock_guard<std::mutex> lock(ctx_lock_);
+    if (ctx_ == nullptr || !connected_.load() || count <= 0) {
+        return std::nullopt;
+    }
+
+    std::vector<uint16_t> values(static_cast<size_t>(count), 0);
+    const int rc = modbus_read_registers(ctx_, start_address, count, values.data());
+    if (rc == -1) {
+        publishModbusOperationError(module_, instance_name_, "read_holding_register_block", modbus_strerror(errno));
+        return std::nullopt;
+    }
+
+    return values;
+}
+
 
 void ModbusTCPClient::setConnected(double connected_value) {
     const bool next_connected = connected_value != 0.0;
