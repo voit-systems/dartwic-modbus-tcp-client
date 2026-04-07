@@ -19,6 +19,7 @@ const releaseModuleDir = path.resolve(repoRoot, "package", "interface-module", p
 const releaseUiDir = path.resolve(releaseModuleDir, "ui");
 const devInstallUiDir = path.resolve(repoRoot, "interface", "modules", "registry", moduleName, "ui");
 const shouldInstallDev = process.argv.includes("--install-dev");
+const shouldCopyPackage = buildConfiguration.copy_package !== false;
 
 async function ensureDir(dirPath) {
     await mkdir(dirPath, { recursive: true });
@@ -55,11 +56,13 @@ for (const target of targets) {
     await writeRuntimeBundle(target, runtimeCode, manifestText);
 }
 
-const externalRegistryTargets = [
-    buildConfiguration.interface_dir
-        ? path.resolve(buildConfiguration.interface_dir, "modules", "registry", moduleName)
-        : null
-].filter(Boolean);
+const externalRegistryTargets = shouldCopyPackage
+    ? [
+        buildConfiguration.interface_dir
+            ? path.resolve(buildConfiguration.interface_dir, "modules", "registry", moduleName)
+            : null
+    ].filter(Boolean)
+    : [];
 
 for (const target of externalRegistryTargets) {
     await copyDirectory(releaseModuleDir, target);
