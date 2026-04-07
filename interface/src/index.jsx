@@ -47,6 +47,11 @@ function normalizeWriteMappings(argumentsPayload, convertChannelValuePathToChann
     return [];
 }
 
+function normalizeReadbackInterval(argumentsPayload) {
+    const value = Number(argumentsPayload?.readback_interval_seconds);
+    return Number.isFinite(value) ? String(value) : "0.5";
+}
+
 export const moduleUiPluginMeta = {
     moduleName: "modbus_tcp_client",
     taskTypes: ["modbus.read_input_registers", "modbus.write"]
@@ -226,6 +231,7 @@ export function createModuleUiPlugin(host) {
         const mappingIdRef = useRef(0);
         const [moduleInstances, setModuleInstances] = useState([]);
         const [selectedInstance, setSelectedInstance] = useState(task.arguments?.module_instance_name || "");
+        const [readbackInterval, setReadbackInterval] = useState(() => normalizeReadbackInterval(task.arguments));
         const [mappings, setMappings] = useState(() =>
             normalizeWriteMappings(task.arguments, convertChannelValuePathToChannelName).map((mapping) => ({
                 ...mapping,
@@ -237,6 +243,7 @@ export function createModuleUiPlugin(host) {
 
         useEffect(() => {
             setSelectedInstance(task.arguments?.module_instance_name || "");
+            setReadbackInterval(normalizeReadbackInterval(task.arguments));
             setMappings(
                 normalizeWriteMappings(task.arguments, convertChannelValuePathToChannelName).map((mapping) => ({
                     ...mapping,
@@ -296,12 +303,14 @@ export function createModuleUiPlugin(host) {
             setErrorMessage("");
 
             try {
+                const cleanedReadbackInterval = Number(readbackInterval);
                 const result = await operation("dartwic/create-task", {
                     portal_name: task.portal,
                     task_name: task.name,
                     task_type: "modbus.write",
                     arguments: {
                         module_instance_name: selectedInstance,
+                        readback_interval_seconds: Number.isFinite(cleanedReadbackInterval) ? cleanedReadbackInterval : 0.5,
                         mappings: cleanedMappings
                     }
                 }, 30000);
@@ -346,6 +355,20 @@ export function createModuleUiPlugin(host) {
                                 ))}
                             </SelectContent>
                         </Select>
+                    </div>
+                    <div className="space-y-2">
+                        <Label>READBACK INTERVAL SECONDS</Label>
+                        <Input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            value={readbackInterval}
+                            placeholder="0 disables periodic readback"
+                            onChange={(event) => setReadbackInterval(event.target.value)}
+                        />
+                        <div className="text-xs text-muted-foreground">
+                            SET TO 0 TO DISABLE PERIODIC READBACK. SUCCESSFUL WRITES STILL TRIGGER A CONFIRMATION READBACK.
+                        </div>
                     </div>
                     <div className="space-y-2">
                         <div className="flex items-center justify-between gap-2">

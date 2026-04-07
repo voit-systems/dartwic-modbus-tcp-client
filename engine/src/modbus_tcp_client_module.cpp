@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstddef>
 #include <iostream>
@@ -42,12 +43,24 @@ namespace {
         int start_address = 0;
         std::vector<ResolvedMapping> mappings;
         std::vector<uint8_t> coil_values;
+        std::vector<uint8_t> last_written_coil_values;
         std::vector<uint16_t> holding_register_values;
+        std::vector<uint16_t> last_written_holding_register_values;
+        bool write_initialized = false;
+        bool needs_readback = false;
     };
 
     struct ReadMappingBlock {
         int start_address = 0;
         std::vector<ResolvedMapping> mappings;
+    };
+
+    struct WriteTaskRuntimeContext {
+        std::shared_ptr<ModbusTCPClientModule> modbus_module;
+        std::vector<WriteMappingBlock> blocks;
+        double readback_interval_seconds = 0.5;
+        bool periodic_readback_enabled = true;
+        std::chrono::steady_clock::time_point next_readback_time = std::chrono::steady_clock::now();
     };
 
     std::optional<RegisterType> parseRegisterType(const nlohmann::json& item) {
@@ -85,6 +98,22 @@ namespace {
         }
 
         return static_cast<uint16_t>(value);
+    }
+
+    double getWriteReadbackIntervalSeconds(const nlohmann::json& arguments) {
+        if (!arguments.is_object()) {
+            return 0.5;
+        }
+
+        if (arguments.contains("readback_interval_seconds") && arguments["readback_interval_seconds"].is_number()) {
+            return arguments["readback_interval_seconds"].get<double>();
+        }
+
+        if (arguments.contains("readback_interval") && arguments["readback_interval"].is_number()) {
+            return arguments["readback_interval"].get<double>();
+        }
+
+        return 0.5;
     }
 
 
@@ -310,8 +339,10 @@ namespace {
             block.mappings.assign(mappings.begin() + static_cast<std::ptrdiff_t>(index), mappings.begin() + static_cast<std::ptrdiff_t>(block_end));
             if (block_type == RegisterType::HoldingRegister) {
                 block.holding_register_values.resize(block.mappings.size(), 0);
+                block.last_written_holding_register_values.resize(block.mappings.size(), 0);
             } else {
                 block.coil_values.resize(block.mappings.size(), 0);
+                block.last_written_coil_values.resize(block.mappings.size(), 0);
             }
             blocks.push_back(std::move(block));
             index = block_end;
@@ -492,6 +523,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
     write_task_type.metadata.expected_module_registry = "modbus_tcp_client";
     write_task_type.metadata.default_arguments = {
         {"module_instance_name", ""},
+        {"readback_interval_seconds", 0.5},
         {"mappings", nlohmann::json::array()}
     };
 
@@ -502,14 +534,20 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         const std::string task_controller = "task:" + task_runtime.getPortalName() + "/" + task_runtime.getTaskName();
         const auto mappings = resolveWriteMappings(task_runtime.getArguments());
         task_runtime.setTypedRuntimeContext("resolved_write_mappings", std::make_shared<std::vector<ResolvedMapping>>(mappings));
-        task_runtime.setTypedRuntimeContext("write_mapping_blocks", std::make_shared<std::vector<WriteMappingBlock>>(buildWriteMappingBlocks(mappings)));
+
+        auto write_context = std::make_shared<WriteTaskRuntimeContext>();
+        write_context->blocks = buildWriteMappingBlocks(mappings);
+        write_context->readback_interval_seconds = getWriteReadbackIntervalSeconds(task_runtime.getArguments());
+        write_context->periodic_readback_enabled = write_context->readback_interval_seconds > 0.0;
+        write_context->next_readback_time = std::chrono::steady_clock::now();
 
         const std::string instance_name = task_runtime.getArguments().value("module_instance_name", std::string{""});
         auto module = drtw->getModuleInstance(instance_name);
         auto modbusModule = std::dynamic_pointer_cast<ModbusTCPClientModule>(module);
         if (modbusModule) {
-            task_runtime.setTypedRuntimeContext("write_modbus_module", modbusModule);
+            write_context->modbus_module = modbusModule;
         }
+        task_runtime.setTypedRuntimeContext("write_task_runtime_context", write_context);
 
         for (const auto& mapping : mappings) {
 
@@ -537,7 +575,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                 mapping.portal,
                 mapping.state_channel,
                 DARTWIC::API::ChannelField::STALE_TIMEOUT,
-                1.00
+                write_context->periodic_readback_enabled ? write_context->readback_interval_seconds * 2.0 : 0.0
             );
 
             //channel
@@ -565,26 +603,22 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
     };
 
     write_task_type.on_task = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
-        auto modbusModule = task_runtime.getTypedRuntimeContext<ModbusTCPClientModule>("write_modbus_module");
-        if (!modbusModule) {
+        auto write_context = task_runtime.getTypedRuntimeContext<WriteTaskRuntimeContext>("write_task_runtime_context");
+        if (!write_context || !write_context->modbus_module) {
             return;
         }
 
         // get reference to client (CLIENT METHODS USED MUST BE THREAD SAFE)
-        auto &client = modbusModule->getTCPClient();
+        auto &client = write_context->modbus_module->getTCPClient();
 
         /// IF MODBUS NOT CONNECTED - PASS
         if (!client.isConnected()) {
             return;
         }
 
-        auto blocks = task_runtime.getTypedRuntimeContext<std::vector<WriteMappingBlock>>("write_mapping_blocks");
-        if (!blocks) {
-            return;
-        }
-
-        for (auto& block : *blocks) {
+        for (auto& block : write_context->blocks) {
             if (block.register_type == RegisterType::HoldingRegister) {
+                bool should_write = !block.write_initialized;
                 for (size_t index = 0; index < block.mappings.size(); ++index) {
                     const auto& mapping = block.mappings[index];
                     block.holding_register_values[index] = channelValueToRegister(drtw->queryChannelField(
@@ -593,9 +627,15 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                         DARTWIC::API::ChannelField::VALUE,
                         DARTWIC::API::ChannelValue{0.0}
                     ));
+                    should_write = should_write || block.holding_register_values[index] != block.last_written_holding_register_values[index];
                 }
-                client.writeHoldingRegisterBlock(block.start_address, block.holding_register_values);
+                if (should_write && client.writeHoldingRegisterBlock(block.start_address, block.holding_register_values)) {
+                    block.last_written_holding_register_values = block.holding_register_values;
+                    block.write_initialized = true;
+                    block.needs_readback = true;
+                }
             } else {
+                bool should_write = !block.write_initialized;
                 for (size_t index = 0; index < block.mappings.size(); ++index) {
                     const auto& mapping = block.mappings[index];
                     block.coil_values[index] = drtw->queryChannelField(
@@ -604,12 +644,41 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                         DARTWIC::API::ChannelField::VALUE,
                         DARTWIC::API::ChannelValue{0.0}
                     ) != 0.0 ? 1 : 0;
+                    should_write = should_write || block.coil_values[index] != block.last_written_coil_values[index];
                 }
-                client.writeCoilBlock(block.start_address, block.coil_values);
+                if (should_write && client.writeCoilBlock(block.start_address, block.coil_values)) {
+                    block.last_written_coil_values = block.coil_values;
+                    block.write_initialized = true;
+                    block.needs_readback = true;
+                }
             }
         }
 
-        for (const auto& block : *blocks) {
+        const auto now = std::chrono::steady_clock::now();
+        bool should_run_periodic_readback = false;
+        if (write_context->periodic_readback_enabled && now >= write_context->next_readback_time) {
+            should_run_periodic_readback = true;
+            write_context->next_readback_time = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(write_context->readback_interval_seconds)
+            );
+        }
+
+        const bool has_pending_write_readback = std::any_of(
+            write_context->blocks.begin(),
+            write_context->blocks.end(),
+            [](const WriteMappingBlock& block) {
+                return block.needs_readback;
+            }
+        );
+        if (!should_run_periodic_readback && !has_pending_write_readback) {
+            return;
+        }
+
+        for (auto& block : write_context->blocks) {
+            if (!should_run_periodic_readback && !block.needs_readback) {
+                continue;
+            }
+
             const int count = static_cast<int>(block.mappings.size());
             if (block.register_type == RegisterType::HoldingRegister) {
                 const auto values = client.readHoldingRegisterBlock(block.start_address, count);
@@ -623,6 +692,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                             static_cast<double>((*values)[offset])
                         );
                     }
+                    block.needs_readback = false;
                 }
             } else {
                 const auto values = client.readCoilBlock(block.start_address, count);
@@ -636,6 +706,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                             static_cast<double>((*values)[offset])
                         );
                     }
+                    block.needs_readback = false;
                 }
             }
         }

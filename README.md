@@ -35,6 +35,7 @@ Each mapping contains:
 The `modbus.write` task expects:
 
 - `module_instance_name`: The target Modbus TCP client module instance to use
+- `readback_interval_seconds`: How often to bulk-read state while idle. Set to `0` or lower to disable periodic readback; successful writes still trigger a confirmation readback
 - `mappings`: A list of register-to-channel mappings
 
 Each mapping contains:
@@ -43,7 +44,7 @@ Each mapping contains:
 - `register`: The Modbus coil or holding register address to write
 - `channel`: The DARTWIC channel whose current value should be written to the target register
 
-Coil mappings treat any non-zero channel value as `true` and write `0` as `false`. Holding-register mappings write the channel value as a 16-bit unsigned register value.
+Coil mappings treat any non-zero channel value as `true` and write `0` as `false`. Holding-register mappings write the channel value as a 16-bit unsigned register value. Write tasks skip bulk writes when mapped channel values have not changed, read back successfully written blocks for confirmation, and throttle idle state readbacks by `readback_interval_seconds`.
 
 In practice, a typical setup flow is:
 
