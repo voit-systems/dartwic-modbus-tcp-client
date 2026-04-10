@@ -1,3 +1,0 @@
-C:/Users/kempt/OneDrive/Documents/Github/Repositories/DARTWIC/tests/dartwic-modbus-tcp-client/cmake-build-debug/CMakeFiles/modbus_tcp_client.dir
-C:/Users/kempt/OneDrive/Documents/Github/Repositories/DARTWIC/tests/dartwic-modbus-tcp-client/cmake-build-debug/CMakeFiles/edit_cache.dir
-C:/Users/kempt/OneDrive/Documents/Github/Repositories/DARTWIC/tests/dartwic-modbus-tcp-client/cmake-build-debug/CMakeFiles/rebuild_cache.dir

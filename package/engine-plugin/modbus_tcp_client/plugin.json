@@ -1,7 +1,0 @@
-{
-  "id": "modbus_tcp_client",
-  "type": "engine",
-  "name": "Modbus TCP Client",
-  "version": "0.4.0",
-  "plugins_api_version": 1
-}
