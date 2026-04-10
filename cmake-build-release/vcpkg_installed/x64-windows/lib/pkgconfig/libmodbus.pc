@@ -1,0 +1,12 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: modbus
+Description: Modbus library
+Version: 3.1.11
+Libs: "-L${libdir}" -lmodbus
+Libs.private:  -lws2_32
+Cflags: "-I${includedir}/modbus"
+

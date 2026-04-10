@@ -1,0 +1,5 @@
+ninja_dyndep_version = 1.0
+build CMakeFiles\modbus_tcp_client.dir\engine\src\modbus_tcp_client.cpp.obj: dyndep
+
+build CMakeFiles\modbus_tcp_client.dir\engine\src\modbus_tcp_client_module.cpp.obj: dyndep
+

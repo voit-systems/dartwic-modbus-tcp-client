@@ -1,0 +1,49 @@
+{
+  "name": "modbus_tcp_client",
+  "title": "Modbus TCP Client",
+  "description": "Creates a Modbus TCP client instance that task types can use to read input registers and write coils or holding registers.",
+  "author": "Voit Systems",
+  "version": "1.1",
+  "icon_image_src": "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg",
+  "ui": {
+    "categories": [
+      {
+        "category": "Connection",
+        "parameters": {
+          "server_ip": {
+            "default": "127.0.0.1",
+            "input": {
+              "type": "discrete_input",
+              "label": "Server IP",
+              "placeholder": "Enter server IP..."
+            }
+          },
+          "server_port": {
+            "default": 502,
+            "input": {
+              "type": "numerical_input",
+              "label": "Server Port",
+              "placeholder": ""
+            }
+          },
+          "tv_sec": {
+            "default": 3,
+            "input": {
+              "type": "numerical_input",
+              "label": "Timeout Seconds",
+              "placeholder": ""
+            }
+          },
+          "tv_usec": {
+            "default": 0,
+            "input": {
+              "type": "numerical_input",
+              "label": "Timeout Microseconds",
+              "placeholder": ""
+            }
+          }
+        }
+      }
+    ]
+  }
+}

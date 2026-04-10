@@ -12,76 +12,86 @@ endif()
 set(ENGINE_DIR "${PROJECT_SOURCE_DIR}/engine")
 set(PACKAGE_INFO_FILE "${PROJECT_SOURCE_DIR}/package-info.json")
 set(BUILD_CONFIGURATION_FILE "${PROJECT_SOURCE_DIR}/build-configuration.json")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${BUILD_CONFIGURATION_FILE}")
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${PACKAGE_INFO_FILE}"
+        "${ENGINE_DIR}/plugin.json"
+        "${BUILD_CONFIGURATION_FILE}")
+
+file(READ "${ENGINE_DIR}/plugin.json" ENGINE_PLUGIN_JSON)
+string(JSON ENGINE_PLUGIN_ID GET "${ENGINE_PLUGIN_JSON}" id)
+string(JSON ENGINE_PLUGINS_API_VERSION GET "${ENGINE_PLUGIN_JSON}" plugins_api_version)
+if(NOT ENGINE_PLUGINS_API_VERSION MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "engine/plugin.json plugins_api_version must be an integer.")
+endif()
+file(READ "${PACKAGE_INFO_FILE}" PACKAGE_INFO_JSON)
+string(JSON PACKAGE_INFO_JSON SET "${PACKAGE_INFO_JSON}" "plugins_api_version" "${ENGINE_PLUGINS_API_VERSION}")
+string(JSON PACKAGE_INFO_JSON SET "${PACKAGE_INFO_JSON}" "contains_engine_plugin" true)
+file(WRITE "${PACKAGE_INFO_FILE}" "${PACKAGE_INFO_JSON}\n")
+
+file(READ "${BUILD_CONFIGURATION_FILE}" BUILD_CONFIGURATION_JSON)
+string(JSON COPY_PACKAGE_VALUE ERROR_VARIABLE COPY_PACKAGE_ERROR GET "${BUILD_CONFIGURATION_JSON}" copy_package)
+if(COPY_PACKAGE_ERROR)
+    set(COPY_PACKAGE_VALUE true)
+endif()
+
+string(JSON EXTERNAL_ENGINE_ROOT ERROR_VARIABLE ENGINE_DIR_ERROR GET "${BUILD_CONFIGURATION_JSON}" engine_dir)
+if(ENGINE_DIR_ERROR)
+    set(EXTERNAL_ENGINE_ROOT "")
+endif()
+
+set(SHOULD_COPY_PACKAGE OFF)
+if(COPY_PACKAGE_VALUE)
+    set(SHOULD_COPY_PACKAGE ON)
+endif()
 
 file(READ "${PACKAGE_INFO_FILE}" PACKAGE_INFO_JSON)
 string(JSON PACKAGE_ID GET "${PACKAGE_INFO_JSON}" id)
-file(READ "${BUILD_CONFIGURATION_FILE}" BUILD_CONFIGURATION_JSON)
-set(COPY_PACKAGE TRUE)
-string(JSON COPY_PACKAGE_VALUE ERROR_VARIABLE COPY_PACKAGE_ERROR GET "${BUILD_CONFIGURATION_JSON}" copy_package)
-if(NOT COPY_PACKAGE_ERROR)
-    if("${COPY_PACKAGE_VALUE}" STREQUAL "false" OR "${COPY_PACKAGE_VALUE}" STREQUAL "FALSE" OR "${COPY_PACKAGE_VALUE}" STREQUAL "OFF" OR "${COPY_PACKAGE_VALUE}" STREQUAL "0")
-        set(COPY_PACKAGE FALSE)
-    endif()
-endif()
-string(JSON ENGINE_INSTALL_DIR ERROR_VARIABLE ENGINE_INSTALL_DIR_ERROR GET "${BUILD_CONFIGURATION_JSON}" engine_dir)
-if(NOT ENGINE_INSTALL_DIR_ERROR AND NOT "${ENGINE_INSTALL_DIR}" STREQUAL "" AND NOT "${ENGINE_INSTALL_DIR}" STREQUAL "null")
-    file(TO_CMAKE_PATH "${ENGINE_INSTALL_DIR}" ENGINE_INSTALL_DIR)
-endif()
-set(ENGINE_PACKAGE_DIR "${PROJECT_SOURCE_DIR}/package/engine-module/${PACKAGE_ID}")
 
-############### SOURCE FILES ###############
+set(ENGINE_PACKAGE_DIR "${PROJECT_SOURCE_DIR}/package/engine-plugin/${ENGINE_PLUGIN_ID}")
+
 file(GLOB_RECURSE SRC_SOURCES "${ENGINE_DIR}/src/*.cpp")
-
-### CREATE MAIN LIBRARY ###
 add_library(modbus_tcp_client SHARED ${SRC_SOURCES})
 
-############### INCLUDE DIRECTORIES ###############
-file(GLOB subdirs
+file(GLOB ENGINE_INCLUDE_DIRS
         CONFIGURE_DEPENDS
         LIST_DIRECTORIES true
         "${ENGINE_DIR}/include/*")
 
 target_include_directories(modbus_tcp_client PRIVATE
         "${ENGINE_DIR}/include"
-        ${subdirs})
+        ${ENGINE_INCLUDE_DIRS})
 
-############### NON HEADER ONLY LIBRARY INCLUDES ###############
-find_package(yaml-cpp CONFIG REQUIRED)
 find_package(libmodbus CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 target_link_libraries(modbus_tcp_client PRIVATE
-        yaml-cpp::yaml-cpp
         modbus
-        nlohmann_json
+        nlohmann_json::nlohmann_json
 )
 
-############### OUTPUT DIRECTORIES ###############
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
 set_target_properties(modbus_tcp_client PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${ENGINE_PACKAGE_DIR}/bin"
-)
-
-############### COPY FILES ###############
-set(CONFIG_FILE "${ENGINE_DIR}/src/module_config.yaml")
+        RUNTIME_OUTPUT_DIRECTORY "${ENGINE_PACKAGE_DIR}/bin")
 
 add_custom_command(TARGET modbus_tcp_client POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_PACKAGE_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CONFIG_FILE}"
-        "${ENGINE_PACKAGE_DIR}/module_config.yaml"
-        COMMENT "Copying module_config.yaml to output folder"
+        "${ENGINE_DIR}/plugin.json"
+        "${ENGINE_PACKAGE_DIR}/plugin.json"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ENGINE_DIR}/src/module_config.json"
+        "${ENGINE_PACKAGE_DIR}/module_config.json"
+        COMMENT "Copying engine plugin metadata into package output"
 )
 
-if(COPY_PACKAGE AND NOT ENGINE_INSTALL_DIR_ERROR AND NOT "${ENGINE_INSTALL_DIR}" STREQUAL "" AND NOT "${ENGINE_INSTALL_DIR}" STREQUAL "null")
-    set(ENGINE_REGISTRY_DIR "${ENGINE_INSTALL_DIR}/modules/registry/${PACKAGE_ID}")
-
+if(SHOULD_COPY_PACKAGE AND NOT "${EXTERNAL_ENGINE_ROOT}" STREQUAL "")
+    set(EXTERNAL_ENGINE_PLUGIN_DIR "${EXTERNAL_ENGINE_ROOT}/plugins/${ENGINE_PLUGIN_ID}")
     add_custom_command(TARGET modbus_tcp_client POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_INSTALL_DIR}/modules/registry"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ENGINE_PACKAGE_DIR}" "${ENGINE_REGISTRY_DIR}"
-            COMMENT "Copying packaged engine module to external engine registry"
-    )
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${EXTERNAL_ENGINE_ROOT}/plugins"
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ENGINE_PACKAGE_DIR}" "${EXTERNAL_ENGINE_PLUGIN_DIR}"
+            COMMENT "Copying packaged engine plugin to external DARTWIC engine plugins directory")
 endif()

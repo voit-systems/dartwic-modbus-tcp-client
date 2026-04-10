@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "CMakeFiles\\modbus_tcp_client.dir\\engine\\src\\modbus_tcp_client_module.cpp.obj",
+            "outputs": [
+                "C:\\Users\\kempt\\OneDrive\\Documents\\Github\\Repositories\\DARTWIC\\tests\\dartwic-modbus-tcp-client\\cmake-build-release\\vc140.pdb",
+                "CMakeFiles\\modbus_tcp_client.dir\\engine\\src\\modbus_tcp_client_module.cpp.obj.ddi"
+            ],
+            "requires": []
+        }
+    ]
+}

@@ -4,6 +4,8 @@
 
 #include "modbus_tcp_client_module.h"
 
+#include "modbus_tcp_client_plugin.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -358,7 +360,7 @@ namespace {
     #define EXPORT_API __attribute__((visibility("default")))
 #endif
 
-ModbusTCPClientModule::ModbusTCPClientModule(YAML::Node cfg, DARTWIC::API::SDK_API* drtw)
+ModbusTCPClientModule::ModbusTCPClientModule(nlohmann::json cfg, DARTWIC::API::SDK_API* drtw)
     : BaseModule(cfg, drtw),
     instance_name_(getConfig<std::string>("name")),
     client_(this,
@@ -378,24 +380,21 @@ ModbusTCPClient & ModbusTCPClientModule::getTCPClient() {
     return client_;
 }
 
-extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_API* drtw) {
-
-    std::cout << "hello" << std::endl;
-
+void ModbusTCPClientPlugin::onPluginLoaded() {
 
     ///// READ TASK /////
     DARTWIC::API::TaskTypeDefinition read_task_type;
     read_task_type.metadata.task_type = "modbus.read_input_registers";;
     read_task_type.metadata.icon_url = "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg";
     read_task_type.metadata.exposed_from = "modbus_tcp_client";
-    read_task_type.metadata.expected_module_registry = "modbus_tcp_client";
+    read_task_type.metadata.expected_plugin_id = "modbus_tcp_client";
     read_task_type.metadata.default_arguments = {
         {"module_instance_name", ""},
         {"mappings", nlohmann::json::array()}
     };
 
     /// START ///
-    read_task_type.on_start = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
+    read_task_type.on_start = [this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
 
         // SET CHANNEL AUTHORITY and STALE
         // go through each channel used by this task and set to observe only autority
@@ -405,33 +404,33 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         task_runtime.setTypedRuntimeContext("read_mapping_blocks", std::make_shared<std::vector<ReadMappingBlock>>(buildReadMappingBlocks(mappings)));
 
         const std::string instance_name = task_runtime.getArguments().value("module_instance_name", std::string{""});
-        auto module = drtw->getModuleInstance(instance_name);
+        auto module = dartwic->getModuleInstance(instance_name);
         auto modbusModule = std::dynamic_pointer_cast<ModbusTCPClientModule>(module);
         if (modbusModule) {
             task_runtime.setTypedRuntimeContext("read_modbus_module", modbusModule);
         }
 
         for (const auto& mapping : mappings) {
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
                 std::string{"observe_only"}
             );
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_OWNER,
                 task_controller
             );
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
                 task_controller
             );
 
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::STALE_TIMEOUT,
@@ -441,7 +440,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
     };
 
     /// TASK ///
-    read_task_type.on_task = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
+    read_task_type.on_task = [this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
         auto modbusModule = task_runtime.getTypedRuntimeContext<ModbusTCPClientModule>("read_modbus_module");
         if (!modbusModule) {
             return;
@@ -466,7 +465,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
             if (values.has_value()) {
                 for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
                     const auto& mapping = block.mappings[offset];
-                    drtw->upsertChannelField(
+                    dartwic->upsertChannelField(
                         mapping.portal,
                         mapping.channel,
                         DARTWIC::API::ChannelField::VALUE,
@@ -477,7 +476,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         }
     };
 
-    read_task_type.on_end = [drtw](const DARTWIC::API::TaskTypeDefinition&, DARTWIC::API::TaskRuntime& task_runtime) {
+    read_task_type.on_end = [this](const DARTWIC::API::TaskTypeDefinition&, DARTWIC::API::TaskRuntime& task_runtime) {
         // SET CHANNEL AUTHORITY
         // set to free once done
         auto mappings = task_runtime.getTypedRuntimeContext<std::vector<ResolvedMapping>>("resolved_register_mappings");
@@ -486,19 +485,19 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         }
 
         for (const auto& mapping : *mappings) {
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
                 std::string{"free"}
             );
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_OWNER,
                 std::string{""}
             );
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
@@ -512,7 +511,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
     };
 
     // register
-    drtw->registerTaskType(read_task_type);
+    dartwic->registerTaskType(read_task_type);
 
 
     ///// WRITE TASK /////
@@ -520,14 +519,14 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
     write_task_type.metadata.task_type = "modbus.write";
     write_task_type.metadata.icon_url = "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg";
     write_task_type.metadata.exposed_from = "modbus_tcp_client";
-    write_task_type.metadata.expected_module_registry = "modbus_tcp_client";
+    write_task_type.metadata.expected_plugin_id = "modbus_tcp_client";
     write_task_type.metadata.default_arguments = {
         {"module_instance_name", ""},
         {"readback_interval_seconds", 0.5},
         {"mappings", nlohmann::json::array()}
     };
 
-    write_task_type.on_start = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
+    write_task_type.on_start = [this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime) {
 
         // SET CHANNEL AUTHORITY and STALE for write state channels
         // go through each channel used by this task and set to observe only autority
@@ -542,7 +541,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         write_context->next_readback_time = std::chrono::steady_clock::now();
 
         const std::string instance_name = task_runtime.getArguments().value("module_instance_name", std::string{""});
-        auto module = drtw->getModuleInstance(instance_name);
+        auto module = dartwic->getModuleInstance(instance_name);
         auto modbusModule = std::dynamic_pointer_cast<ModbusTCPClientModule>(module);
         if (modbusModule) {
             write_context->modbus_module = modbusModule;
@@ -552,26 +551,26 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
         for (const auto& mapping : mappings) {
 
             //state channel
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.state_channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
                 std::string{"observe_only"}
             );
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.state_channel,
                 DARTWIC::API::ChannelField::CONTROL_OWNER,
                 task_controller
             );
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.state_channel,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
                 task_controller
             );
 
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.state_channel,
                 DARTWIC::API::ChannelField::STALE_TIMEOUT,
@@ -579,19 +578,19 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
             );
 
             //channel
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
                 std::string{"free"}
             );
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_OWNER,
                 task_controller
             );
-            drtw->upsertChannelField(
+            dartwic->upsertChannelField(
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::ACTIVE_CONTROLLER,
@@ -602,7 +601,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
 
     };
 
-    write_task_type.on_task = [drtw](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
+    write_task_type.on_task = [this](const DARTWIC::API::TaskTypeDefinition& definition, DARTWIC::API::TaskRuntime& task_runtime, double elapsed_seconds) {
         auto write_context = task_runtime.getTypedRuntimeContext<WriteTaskRuntimeContext>("write_task_runtime_context");
         if (!write_context || !write_context->modbus_module) {
             return;
@@ -621,7 +620,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                 bool should_write = !block.write_initialized;
                 for (size_t index = 0; index < block.mappings.size(); ++index) {
                     const auto& mapping = block.mappings[index];
-                    block.holding_register_values[index] = channelValueToRegister(drtw->queryChannelField(
+                    block.holding_register_values[index] = channelValueToRegister(dartwic->queryChannelField(
                         mapping.portal,
                         mapping.channel,
                         DARTWIC::API::ChannelField::VALUE,
@@ -638,7 +637,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                 bool should_write = !block.write_initialized;
                 for (size_t index = 0; index < block.mappings.size(); ++index) {
                     const auto& mapping = block.mappings[index];
-                    block.coil_values[index] = drtw->queryChannelField(
+                    block.coil_values[index] = dartwic->queryChannelField(
                         mapping.portal,
                         mapping.channel,
                         DARTWIC::API::ChannelField::VALUE,
@@ -685,7 +684,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                 if (values.has_value()) {
                     for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
                         const auto& mapping = block.mappings[offset];
-                        drtw->upsertChannelField(
+                        dartwic->upsertChannelField(
                             mapping.portal,
                             mapping.state_channel,
                             DARTWIC::API::ChannelField::VALUE,
@@ -699,7 +698,7 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
                 if (values.has_value()) {
                     for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
                         const auto& mapping = block.mappings[offset];
-                        drtw->upsertChannelField(
+                        dartwic->upsertChannelField(
                             mapping.portal,
                             mapping.state_channel,
                             DARTWIC::API::ChannelField::VALUE,
@@ -721,11 +720,23 @@ extern "C" EXPORT_API void onRegistryLoaded(YAML::Node cfg, DARTWIC::API::SDK_AP
     };
 
     // register
-    drtw->registerTaskType(write_task_type);
+    dartwic->registerTaskType(write_task_type);
 }
 
-extern "C" EXPORT_API DARTWIC::Modules::BaseModule* createModule(YAML::Node cfg, DARTWIC::API::SDK_API* drtw) {
+DARTWIC::Modules::BaseModule* ModbusTCPClientPlugin::createModule(
+    const std::string& module_type_id,
+    nlohmann::json cfg,
+    DARTWIC::API::SDK_API* drtw
+) {
+    if (module_type_id != "modbus_tcp_client") {
+        return nullptr;
+    }
+
     return new ModbusTCPClientModule(cfg, drtw);
+}
+
+extern "C" EXPORT_API DARTWIC::Plugins::BasePlugin* createPlugin(nlohmann::json cfg, DARTWIC::API::SDK_API* drtw) {
+    return new ModbusTCPClientPlugin(std::move(cfg), drtw);
 }
 
 

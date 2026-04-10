@@ -41,7 +41,7 @@ namespace DARTWIC::API {
         std::string task_type;
         std::string icon_url;
         std::string exposed_from;
-        std::string expected_module_registry;
+        std::string expected_plugin_id;
         nlohmann::json default_arguments = nlohmann::json::object();
     };
 
@@ -86,7 +86,8 @@ namespace DARTWIC::API {
 
     struct ModuleInstanceSummary {
         std::string name;
-        std::string registry_name;
+        std::string plugin_id;
+        std::string module_type_id;
     };
 
     class SDK_API {
@@ -126,7 +127,7 @@ namespace DARTWIC::API {
 
         virtual void registerTaskType(const TaskTypeDefinition& task_type_definition) = 0;
         virtual std::shared_ptr<Modules::BaseModule> getModuleInstance(const std::string& instance_name) = 0;
-        virtual std::vector<ModuleInstanceSummary> getModuleInstances(const std::string& registry_name = "") = 0;
+        virtual std::vector<ModuleInstanceSummary> getModuleInstances(const std::string& plugin_id = "") = 0;
     };
 }
 

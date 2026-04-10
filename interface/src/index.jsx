@@ -766,6 +766,7 @@ export function createModuleUiPlugin(host) {
     }
 
     return {
+        id: moduleUiPluginMeta.moduleName,
         moduleName: moduleUiPluginMeta.moduleName,
         taskTypes: moduleUiPluginMeta.taskTypes,
         ModuleConfigPage: ModbusModuleConfigPage,

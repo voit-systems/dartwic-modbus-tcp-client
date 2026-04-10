@@ -5,14 +5,14 @@
 #ifndef MODBUS_TCP_CLIENT_MODULE_H
 #define MODBUS_TCP_CLIENT_MODULE_H
 
-#include <BaseModule.h>
+#include <modules/BaseModule.h>
 #include <memory>
 #include <modbus_tcp_client.h>
 #include <optional>
 
 class ModbusTCPClientModule : public DARTWIC::Modules::BaseModule {
 public:
-    ModbusTCPClientModule(YAML::Node cfg, DARTWIC::API::SDK_API* drtw);
+    ModbusTCPClientModule(nlohmann::json cfg, DARTWIC::API::SDK_API* drtw);
 
     ModbusTCPClient& getTCPClient();
 

@@ -1,22 +1,12 @@
-# Modbus Interface Plugin
+# Interface Plugin
 
-Author the module UI in:
+This folder is the source for the interface-side Modbus TCP plugin.
 
-- `src/index.jsx`
+- `plugin.json` is the source manifest
+- `src/index.jsx` exports the UI plugin factory
+- `src/runtime-entry.jsx` registers the plugin into `window.__dartwicPluginRegistry__`
 
-Build the runtime plugin with:
+`node ..\\build.mjs` writes the release bundle to:
 
-- `npm install` from the repository root
-- `npm run build` from the repository root
-
-That writes the drag-and-drop app files to:
-
-- `package/interface-module/<package_id>/ui`
-
-For local desktop-app development, you can also run:
-
-- `npm run install:dev` from the repository root
-
-That updates:
-
-- `interface/modules/registry/modbus_tcp_client/ui`
+- `package/interface-plugin/modbus_tcp_client/plugin.json`
+- `package/interface-plugin/modbus_tcp_client/ui/index.js`
