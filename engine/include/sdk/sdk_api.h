@@ -1,11 +1,13 @@
 #ifndef SDK_API_H
 #define SDK_API_H
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -128,6 +130,10 @@ namespace DARTWIC::API {
         virtual void registerTaskType(const TaskTypeDefinition& task_type_definition) = 0;
         virtual std::shared_ptr<Modules::BaseModule> getModuleInstance(const std::string& instance_name) = 0;
         virtual std::vector<ModuleInstanceSummary> getModuleInstances(const std::string& plugin_id = "") = 0;
+
+        virtual void upsertChannelValueBulk(const std::string& portal,
+            const std::string& channel,
+            const std::vector<std::pair<double, uint64_t>>& data) = 0;
     };
 }
 

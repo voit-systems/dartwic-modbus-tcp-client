@@ -15,8 +15,10 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <unordered_set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -55,6 +57,12 @@ namespace {
     struct ReadMappingBlock {
         int start_address = 0;
         std::vector<ResolvedMapping> mappings;
+    };
+
+    struct ChannelValueBulkUpdate {
+        std::string portal;
+        std::string channel;
+        std::vector<std::pair<double, uint64_t>> data;
     };
 
     struct WriteTaskRuntimeContext {
@@ -245,6 +253,14 @@ namespace {
         }
 
         return mappings;
+    }
+
+    uint64_t unixNanosecondsNow() {
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count()
+        );
     }
 
     std::vector<ResolvedMapping> resolveRegisterMappings(const nlohmann::json& arguments) {
@@ -459,20 +475,43 @@ void ModbusTCPClientPlugin::onPluginLoaded() {
             return;
         }
 
+        std::vector<ChannelValueBulkUpdate> channel_value_updates;
+        std::unordered_map<std::string, size_t> channel_value_update_indexes;
+        auto append_channel_value = [&channel_value_updates, &channel_value_update_indexes](
+            const ResolvedMapping& mapping,
+            double value,
+            uint64_t timestamp
+        ) {
+            const std::string update_key = mapping.portal + '\x1f' + mapping.channel;
+            auto existing = channel_value_update_indexes.find(update_key);
+            if (existing == channel_value_update_indexes.end()) {
+                const size_t update_index = channel_value_updates.size();
+                channel_value_update_indexes.emplace(update_key, update_index);
+                channel_value_updates.push_back(ChannelValueBulkUpdate{
+                    .portal = mapping.portal,
+                    .channel = mapping.channel,
+                    .data = {}
+                });
+                existing = channel_value_update_indexes.find(update_key);
+            }
+
+            channel_value_updates[existing->second].data.emplace_back(value, timestamp);
+        };
+
         for (const auto& block : *blocks) {
             const int count = static_cast<int>(block.mappings.size());
             const auto values = client.readInputRegisterBlock(block.start_address, count);
             if (values.has_value()) {
+                const uint64_t read_timestamp = unixNanosecondsNow();
                 for (size_t offset = 0; offset < static_cast<size_t>(count); ++offset) {
                     const auto& mapping = block.mappings[offset];
-                    dartwic->upsertChannelField(
-                        mapping.portal,
-                        mapping.channel,
-                        DARTWIC::API::ChannelField::VALUE,
-                        static_cast<double>((*values)[offset])
-                    );
+                    append_channel_value(mapping, static_cast<double>((*values)[offset]), read_timestamp);
                 }
             }
+        }
+
+        for (const auto& update : channel_value_updates) {
+            dartwic->upsertChannelValueBulk(update.portal, update.channel, update.data);
         }
     };
 
