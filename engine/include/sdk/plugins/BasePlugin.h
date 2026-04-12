@@ -9,7 +9,8 @@
 namespace DARTWIC::Plugins {
     struct PluginModuleType {
         std::string id;
-        std::string config_path;
+        std::string config_path = "module_config.json";
+        std::string default_parameters_path = "default_parameters.json";
     };
 
     class BasePlugin {

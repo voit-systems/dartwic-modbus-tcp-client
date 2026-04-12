@@ -10,29 +10,28 @@ if(MSVC)
 endif()
 
 set(ENGINE_DIR "${PROJECT_SOURCE_DIR}/engine")
-set(PACKAGE_INFO_FILE "${PROJECT_SOURCE_DIR}/package-info.json")
+set(PLUGIN_MANIFEST_FILE "${PROJECT_SOURCE_DIR}/plugin.json")
 set(BUILD_CONFIGURATION_FILE "${PROJECT_SOURCE_DIR}/build-configuration.json")
 
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-        "${PACKAGE_INFO_FILE}"
-        "${ENGINE_DIR}/plugin.json"
+        "${PLUGIN_MANIFEST_FILE}"
         "${BUILD_CONFIGURATION_FILE}")
 
-file(READ "${ENGINE_DIR}/plugin.json" ENGINE_PLUGIN_JSON)
-string(JSON ENGINE_PLUGIN_ID GET "${ENGINE_PLUGIN_JSON}" id)
-string(JSON ENGINE_PLUGINS_API_VERSION GET "${ENGINE_PLUGIN_JSON}" plugins_api_version)
+file(READ "${PLUGIN_MANIFEST_FILE}" PLUGIN_MANIFEST_JSON)
+string(JSON ENGINE_PLUGIN_ID GET "${PLUGIN_MANIFEST_JSON}" id)
+string(JSON ENGINE_PLUGINS_API_VERSION GET "${PLUGIN_MANIFEST_JSON}" engine_plugins_api_version)
+string(JSON CONTAINS_ENGINE_PLUGIN GET "${PLUGIN_MANIFEST_JSON}" contains_engine_plugin)
 if(NOT ENGINE_PLUGINS_API_VERSION MATCHES "^[0-9]+$")
-    message(FATAL_ERROR "engine/plugin.json plugins_api_version must be an integer.")
+    message(FATAL_ERROR "plugin.json engine_plugins_api_version must be an integer.")
 endif()
-file(READ "${PACKAGE_INFO_FILE}" PACKAGE_INFO_JSON)
-string(JSON PACKAGE_INFO_JSON SET "${PACKAGE_INFO_JSON}" "plugins_api_version" "${ENGINE_PLUGINS_API_VERSION}")
-string(JSON PACKAGE_INFO_JSON SET "${PACKAGE_INFO_JSON}" "contains_engine_plugin" true)
-file(WRITE "${PACKAGE_INFO_FILE}" "${PACKAGE_INFO_JSON}\n")
+if(NOT CONTAINS_ENGINE_PLUGIN)
+    message(FATAL_ERROR "plugin.json must set contains_engine_plugin to true.")
+endif()
 
 file(READ "${BUILD_CONFIGURATION_FILE}" BUILD_CONFIGURATION_JSON)
-string(JSON COPY_PACKAGE_VALUE ERROR_VARIABLE COPY_PACKAGE_ERROR GET "${BUILD_CONFIGURATION_JSON}" copy_package)
-if(COPY_PACKAGE_ERROR)
-    set(COPY_PACKAGE_VALUE true)
+string(JSON COPY_PLUGIN_VALUE ERROR_VARIABLE COPY_PLUGIN_ERROR GET "${BUILD_CONFIGURATION_JSON}" copy_plugin)
+if(COPY_PLUGIN_ERROR)
+    set(COPY_PLUGIN_VALUE true)
 endif()
 
 string(JSON EXTERNAL_ENGINE_ROOT ERROR_VARIABLE ENGINE_DIR_ERROR GET "${BUILD_CONFIGURATION_JSON}" engine_dir)
@@ -40,15 +39,12 @@ if(ENGINE_DIR_ERROR)
     set(EXTERNAL_ENGINE_ROOT "")
 endif()
 
-set(SHOULD_COPY_PACKAGE OFF)
-if(COPY_PACKAGE_VALUE)
-    set(SHOULD_COPY_PACKAGE ON)
+set(SHOULD_COPY_PLUGIN OFF)
+if(COPY_PLUGIN_VALUE)
+    set(SHOULD_COPY_PLUGIN ON)
 endif()
 
-file(READ "${PACKAGE_INFO_FILE}" PACKAGE_INFO_JSON)
-string(JSON PACKAGE_ID GET "${PACKAGE_INFO_JSON}" id)
-
-set(ENGINE_PACKAGE_DIR "${PROJECT_SOURCE_DIR}/package/engine-plugin/${ENGINE_PLUGIN_ID}")
+set(ENGINE_PLUGIN_DIR "${PROJECT_SOURCE_DIR}/plugin/engine/${ENGINE_PLUGIN_ID}")
 
 file(GLOB_RECURSE SRC_SOURCES "${ENGINE_DIR}/src/*.cpp")
 add_library(modbus_tcp_client SHARED ${SRC_SOURCES})
@@ -75,23 +71,26 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set_target_properties(modbus_tcp_client PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${ENGINE_PACKAGE_DIR}/bin")
+        RUNTIME_OUTPUT_DIRECTORY "${ENGINE_PLUGIN_DIR}/bin")
 
 add_custom_command(TARGET modbus_tcp_client POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_PACKAGE_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_PLUGIN_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${ENGINE_DIR}/plugin.json"
-        "${ENGINE_PACKAGE_DIR}/plugin.json"
+        "${PLUGIN_MANIFEST_FILE}"
+        "${ENGINE_PLUGIN_DIR}/plugin.json"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${ENGINE_DIR}/src/module_config.json"
-        "${ENGINE_PACKAGE_DIR}/module_config.json"
-        COMMENT "Copying engine plugin metadata into package output"
+        "${ENGINE_PLUGIN_DIR}/module_config.json"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ENGINE_DIR}/src/default_parameters.json"
+        "${ENGINE_PLUGIN_DIR}/default_parameters.json"
+        COMMENT "Copying engine plugin metadata into plugin output"
 )
 
-if(SHOULD_COPY_PACKAGE AND NOT "${EXTERNAL_ENGINE_ROOT}" STREQUAL "")
+if(SHOULD_COPY_PLUGIN AND NOT "${EXTERNAL_ENGINE_ROOT}" STREQUAL "")
     set(EXTERNAL_ENGINE_PLUGIN_DIR "${EXTERNAL_ENGINE_ROOT}/plugins/${ENGINE_PLUGIN_ID}")
     add_custom_command(TARGET modbus_tcp_client POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${EXTERNAL_ENGINE_ROOT}/plugins"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ENGINE_PACKAGE_DIR}" "${EXTERNAL_ENGINE_PLUGIN_DIR}"
-            COMMENT "Copying packaged engine plugin to external DARTWIC engine plugins directory")
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ENGINE_PLUGIN_DIR}" "${EXTERNAL_ENGINE_PLUGIN_DIR}"
+            COMMENT "Copying engine plugin to external DARTWIC engine plugins directory")
 endif()

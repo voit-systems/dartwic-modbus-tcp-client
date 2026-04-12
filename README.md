@@ -1,17 +1,18 @@
 # dartwic-modbus-tcp-client
 
-Modbus TCP plugin package fixture for the new DARTWIC plugin system.
+Modbus TCP plugin fixture for the DARTWIC plugin system.
 
 ## Layout
 
+- `plugin.json`
+  - single source manifest for the engine and interface sides
 - `engine/`
   - source for the engine plugin DLL
-  - `plugin.json` is the source manifest
-  - `src/module_config.json` describes the repeatable module type exposed by the plugin
+  - `src/module_config.json` describes the module name, title, icon, and description
+  - `src/default_parameters.json` contains the default parameter values for newly created module instances
 - `interface/`
   - source for the interface plugin
-  - `plugin.json` is the source manifest
-- `package/`
+- `plugin/`
   - generated release output only
 
 ## Build
@@ -22,12 +23,12 @@ Modbus TCP plugin package fixture for the new DARTWIC plugin system.
 
 The outputs are written to:
 
-- `package/engine-plugin/modbus_tcp_client`
-- `package/interface-plugin/modbus_tcp_client`
+- `plugin/engine/modbus_tcp_client`
+- `plugin/interface/modbus_tcp_client`
 
 `build-configuration.json` controls optional copy behavior:
 
-- `copy_package`: when `true`, the packaged plugin outputs are also copied to external DARTWIC roots
+- `copy_plugin`: when `true`, the plugin outputs are also copied to external DARTWIC roots
 - `engine_dir`: engine root that receives `plugins/<plugin-id>`
 - `interface_dir`: interface root that receives `plugins/<plugin-id>`
 

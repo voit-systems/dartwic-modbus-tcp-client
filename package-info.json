@@ -1,7 +1,0 @@
-{
-  "contains_engine_plugin" : true,
-  "contains_interface_plugin" : true,
-  "id" : "modbus_tcp_client",
-  "plugins_api_version" : 1,
-  "version" : "0.5.0"
-}

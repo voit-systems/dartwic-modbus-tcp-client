@@ -691,8 +691,8 @@ export function createModuleUiPlugin(host) {
         return (
             <div className="flex flex-col gap-4">
                 <div className="flex h-fit w-fit flex-row items-center gap-5 rounded-lg border border-border p-2">
-                    {moduleConfig.icon_image_src ? (
-                        <img className="h-[30px]" src={moduleConfig.icon_image_src} />
+                    {(moduleConfig.icon || moduleConfig.icon_image_src) ? (
+                        <img className="h-[30px]" src={moduleConfig.icon || moduleConfig.icon_image_src} />
                     ) : null}
                     <Label className="text-lg">{moduleConfig.title || "Modbus TCP Client"}</Label>
                 </div>

@@ -14,7 +14,7 @@ public:
 
     std::vector<DARTWIC::Plugins::PluginModuleType> getModuleTypes() const override {
         return {
-            {"modbus_tcp_client", "module_config.json"}
+            {"modbus_tcp_client"}
         };
     }
 

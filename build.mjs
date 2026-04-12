@@ -7,33 +7,28 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const buildConfigurationPath = path.resolve(__dirname, "build-configuration.json");
 const interfaceRoot = path.resolve(__dirname, "interface");
-const packageInfoPath = path.resolve(__dirname, "package-info.json");
 const runtimeEntryPath = path.resolve(interfaceRoot, "src", "runtime-entry.jsx");
-const sourceManifestPath = path.resolve(interfaceRoot, "plugin.json");
+const sourceManifestPath = path.resolve(__dirname, "plugin.json");
 const buildConfiguration = JSON.parse(await readFile(buildConfigurationPath, "utf8"));
-const packageInfo = JSON.parse(await readFile(packageInfoPath, "utf8"));
 const sourceManifest = JSON.parse(await readFile(sourceManifestPath, "utf8"));
-const packageId = String(packageInfo.id ?? "").trim();
 const pluginId = String(sourceManifest.id ?? "").trim();
-const pluginsApiVersion = Number.parseInt(String(sourceManifest.plugins_api_version ?? "").trim(), 10);
-const releasePluginDir = path.resolve(__dirname, "package", "interface-plugin", pluginId);
+const enginePluginsApiVersion = Number.parseInt(String(sourceManifest.engine_plugins_api_version ?? "").trim(), 10);
+const interfacePluginsApiVersion = Number.parseInt(String(sourceManifest.interface_plugins_api_version ?? "").trim(), 10);
+const releasePluginDir = path.resolve(__dirname, "plugin", "interface", pluginId);
 const releaseUiDir = path.resolve(releasePluginDir, "ui");
 const releaseManifestPath = path.resolve(releasePluginDir, "plugin.json");
 const devInstallPluginDir = path.resolve(__dirname, "..", "interface", "plugins", pluginId);
 const shouldInstallDev = process.argv.includes("--install-dev");
-const shouldCopyPackage = buildConfiguration.copy_package !== false;
+const shouldCopyPlugin = buildConfiguration.copy_plugin !== false;
 
-if (!pluginId || String(sourceManifest.type ?? "").trim() !== "interface" || !Number.isInteger(pluginsApiVersion)) {
-    throw new Error("interface/plugin.json must include id, type='interface', and integer plugins_api_version.");
+if (
+    !pluginId ||
+    !Number.isInteger(enginePluginsApiVersion) ||
+    !Number.isInteger(interfacePluginsApiVersion) ||
+    sourceManifest.contains_interface_plugin !== true
+) {
+    throw new Error("plugin.json must include id, integer engine/interface plugin API versions, and contains_interface_plugin=true.");
 }
-
-if (!packageId) {
-    throw new Error("package-info.json must include id.");
-}
-
-packageInfo.plugins_api_version = pluginsApiVersion;
-packageInfo.contains_interface_plugin = true;
-await writeFile(packageInfoPath, `${JSON.stringify(packageInfo, null, 2)}\n`, "utf8");
 
 await mkdir(releaseUiDir, { recursive: true });
 
@@ -63,7 +58,7 @@ await cp(sourceManifestPath, releaseManifestPath, { force: true });
 await writeFile(path.resolve(releaseUiDir, "index.js"), runtimeCode, "utf8");
 
 const localTargets = shouldInstallDev ? [releasePluginDir, devInstallPluginDir] : [releasePluginDir];
-const externalPluginTargets = shouldCopyPackage
+const externalPluginTargets = shouldCopyPlugin
     ? [
         buildConfiguration.interface_dir
             ? path.resolve(buildConfiguration.interface_dir, "plugins", pluginId)
@@ -79,10 +74,10 @@ for (const target of externalPluginTargets) {
     await copyDirectory(releasePluginDir, target);
 }
 
-console.log(`Built interface plugin for ${packageId}.`);
+console.log(`Built interface plugin for ${pluginId}.`);
 for (const target of localTargets) {
     console.log(`- ${target}`);
 }
 for (const target of externalPluginTargets) {
-    console.log(`- copied packaged interface plugin to ${target}`);
+    console.log(`- copied interface plugin to ${target}`);
 }
