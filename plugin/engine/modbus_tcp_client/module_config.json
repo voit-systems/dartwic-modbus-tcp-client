@@ -1,6 +1,0 @@
-{
-  "name": "modbus_tcp_client",
-  "title": "Modbus TCP Client",
-  "icon": "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg",
-  "description": "Creates a Modbus TCP client instance that task types can use to read input registers and write coils or holding registers."
-}

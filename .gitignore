@@ -2,3 +2,5 @@ cmake-build-release/
 cmake-build-debug/
 plugin.zip
 .idea/
+node_modules/
+plugin/
