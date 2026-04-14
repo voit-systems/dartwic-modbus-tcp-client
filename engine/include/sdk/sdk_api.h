@@ -16,6 +16,12 @@ namespace DARTWIC::Modules {
 }
 
 namespace DARTWIC::API {
+    enum class TaskStructure {
+        Unknown,
+        Periodic,
+        Worker
+    };
+
     enum class ChannelField {
         VALUE,
         COMMANDED_BY,
@@ -41,6 +47,7 @@ namespace DARTWIC::API {
 
     struct TaskTypeMetadata {
         std::string task_type;
+        TaskStructure structure = TaskStructure::Unknown;
         std::string icon_url;
         std::string exposed_from;
         std::string expected_plugin_id;
@@ -57,6 +64,7 @@ namespace DARTWIC::API {
         virtual const nlohmann::json& getMetadata() const = 0;
         virtual const nlohmann::json& getArguments() const = 0;
         virtual double getElapsedSeconds() const = 0;
+        virtual bool isStopRequested() const = 0;
 
         virtual void setRuntimeContext(const std::string& key, std::shared_ptr<void> value) = 0;
         virtual std::shared_ptr<void> getRuntimeContext(const std::string& key) const = 0;

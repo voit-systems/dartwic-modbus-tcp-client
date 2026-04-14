@@ -401,6 +401,7 @@ void ModbusTCPClientPlugin::onPluginLoaded() {
     ///// READ TASK /////
     DARTWIC::API::TaskTypeDefinition read_task_type;
     read_task_type.metadata.task_type = "modbus.read_input_registers";;
+    read_task_type.metadata.structure = DARTWIC::API::TaskStructure::Periodic;
     read_task_type.metadata.icon_url = "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg";
     read_task_type.metadata.exposed_from = "modbus_tcp_client";
     read_task_type.metadata.expected_plugin_id = "modbus_tcp_client";
@@ -556,6 +557,7 @@ void ModbusTCPClientPlugin::onPluginLoaded() {
     ///// WRITE TASK /////
     DARTWIC::API::TaskTypeDefinition write_task_type;
     write_task_type.metadata.task_type = "modbus.write";
+    write_task_type.metadata.structure = DARTWIC::API::TaskStructure::Periodic;
     write_task_type.metadata.icon_url = "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg";
     write_task_type.metadata.exposed_from = "modbus_tcp_client";
     write_task_type.metadata.expected_plugin_id = "modbus_tcp_client";
