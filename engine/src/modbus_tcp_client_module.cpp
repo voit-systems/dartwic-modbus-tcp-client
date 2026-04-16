@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+using DARTWIC::API::ControlPolicy;
+
 namespace {
 
     enum class RegisterType {
@@ -143,7 +145,7 @@ namespace {
             "offset",
             "stale_timeout",
             "mapped_channel",
-            "record_on_value_change",
+            "record_mode",
             "mean",
             "median",
             "stdev",
@@ -432,7 +434,7 @@ void ModbusTCPClientPlugin::onPluginLoaded() {
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
-                std::string{"observe_only"}
+                ControlPolicy::ObserveOnly
             );
             dartwic->upsertChannelField(
                 mapping.portal,
@@ -529,7 +531,7 @@ void ModbusTCPClientPlugin::onPluginLoaded() {
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
-                std::string{"free"}
+                ControlPolicy::Free
             );
             dartwic->upsertChannelField(
                 mapping.portal,
@@ -596,7 +598,7 @@ void ModbusTCPClientPlugin::onPluginLoaded() {
                 mapping.portal,
                 mapping.state_channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
-                std::string{"observe_only"}
+                ControlPolicy::ObserveOnly
             );
             dartwic->upsertChannelField(
                 mapping.portal,
@@ -623,7 +625,7 @@ void ModbusTCPClientPlugin::onPluginLoaded() {
                 mapping.portal,
                 mapping.channel,
                 DARTWIC::API::ChannelField::CONTROL_POLICY,
-                std::string{"free"}
+                ControlPolicy::Free
             );
             dartwic->upsertChannelField(
                 mapping.portal,
