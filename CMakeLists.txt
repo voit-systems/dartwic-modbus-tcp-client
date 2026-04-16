@@ -47,21 +47,21 @@ endif()
 set(ENGINE_PLUGIN_DIR "${PROJECT_SOURCE_DIR}/plugin/engine/${ENGINE_PLUGIN_ID}")
 
 file(GLOB_RECURSE SRC_SOURCES "${ENGINE_DIR}/src/*.cpp")
-add_library(modbus_tcp_client SHARED ${SRC_SOURCES})
+add_library(modbus_tcp_client_engine SHARED ${SRC_SOURCES})
 
 file(GLOB ENGINE_INCLUDE_DIRS
         CONFIGURE_DEPENDS
         LIST_DIRECTORIES true
         "${ENGINE_DIR}/include/*")
 
-target_include_directories(modbus_tcp_client PRIVATE
+target_include_directories(modbus_tcp_client_engine PRIVATE
         "${ENGINE_DIR}/include"
         ${ENGINE_INCLUDE_DIRS})
 
 find_package(libmodbus CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 
-target_link_libraries(modbus_tcp_client PRIVATE
+target_link_libraries(modbus_tcp_client_engine PRIVATE
         modbus
         nlohmann_json::nlohmann_json
 )
@@ -70,10 +70,11 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-set_target_properties(modbus_tcp_client PROPERTIES
+set_target_properties(modbus_tcp_client_engine PROPERTIES
+        OUTPUT_NAME "${ENGINE_PLUGIN_ID}"
         RUNTIME_OUTPUT_DIRECTORY "${ENGINE_PLUGIN_DIR}/bin")
 
-add_custom_command(TARGET modbus_tcp_client POST_BUILD
+set(ENGINE_PLUGIN_COPY_COMMANDS
         COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_PLUGIN_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${PLUGIN_MANIFEST_FILE}"
@@ -83,14 +84,19 @@ add_custom_command(TARGET modbus_tcp_client POST_BUILD
         "${ENGINE_PLUGIN_DIR}/module_config.json"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${ENGINE_DIR}/src/default_parameters.json"
-        "${ENGINE_PLUGIN_DIR}/default_parameters.json"
-        COMMENT "Copying engine plugin metadata into plugin output"
-)
+        "${ENGINE_PLUGIN_DIR}/default_parameters.json")
 
 if(SHOULD_COPY_PLUGIN AND NOT "${EXTERNAL_ENGINE_ROOT}" STREQUAL "")
     set(EXTERNAL_ENGINE_PLUGIN_DIR "${EXTERNAL_ENGINE_ROOT}/plugins/${ENGINE_PLUGIN_ID}")
-    add_custom_command(TARGET modbus_tcp_client POST_BUILD
+    list(APPEND ENGINE_PLUGIN_COPY_COMMANDS
             COMMAND ${CMAKE_COMMAND} -E make_directory "${EXTERNAL_ENGINE_ROOT}/plugins"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ENGINE_PLUGIN_DIR}" "${EXTERNAL_ENGINE_PLUGIN_DIR}"
-            COMMENT "Copying engine plugin to external DARTWIC engine plugins directory")
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ENGINE_PLUGIN_DIR}" "${EXTERNAL_ENGINE_PLUGIN_DIR}")
 endif()
+
+add_custom_target(modbus_tcp_client ALL
+        ${ENGINE_PLUGIN_COPY_COMMANDS}
+        DEPENDS modbus_tcp_client_engine
+        COMMENT "Copying engine plugin files")
+
+add_custom_target(copy_engine_plugin
+        DEPENDS modbus_tcp_client)
