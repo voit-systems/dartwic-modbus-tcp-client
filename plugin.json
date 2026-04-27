@@ -3,7 +3,7 @@
   "name": "Modbus TCP Client Plugin",
   "version": "0.6.0",
   "engine_plugins_api_version": 2,
-  "interface_plugins_api_version": 1,
+  "interface_plugins_api_version": 2,
   "contains_engine_plugin": true,
   "contains_interface_plugin": true
 }

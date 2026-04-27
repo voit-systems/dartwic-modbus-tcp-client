@@ -44,6 +44,15 @@ if(COPY_PLUGIN_VALUE)
     set(SHOULD_COPY_PLUGIN ON)
 endif()
 
+set(SHOULD_COPY_EXTERNAL_ENGINE_PLUGIN OFF)
+if(SHOULD_COPY_PLUGIN AND NOT "${EXTERNAL_ENGINE_ROOT}" STREQUAL "")
+    if(IS_DIRECTORY "${EXTERNAL_ENGINE_ROOT}")
+        set(SHOULD_COPY_EXTERNAL_ENGINE_PLUGIN ON)
+    else()
+        message(WARNING "Skipping external engine plugin copy because engine_dir does not exist: ${EXTERNAL_ENGINE_ROOT}")
+    endif()
+endif()
+
 set(ENGINE_PLUGIN_DIR "${PROJECT_SOURCE_DIR}/plugin/engine/${ENGINE_PLUGIN_ID}")
 
 file(GLOB_RECURSE SRC_SOURCES "${ENGINE_DIR}/src/*.cpp")
@@ -86,7 +95,7 @@ set(ENGINE_PLUGIN_COPY_COMMANDS
         "${ENGINE_DIR}/src/default_parameters.json"
         "${ENGINE_PLUGIN_DIR}/default_parameters.json")
 
-if(SHOULD_COPY_PLUGIN AND NOT "${EXTERNAL_ENGINE_ROOT}" STREQUAL "")
+if(SHOULD_COPY_EXTERNAL_ENGINE_PLUGIN)
     set(EXTERNAL_ENGINE_PLUGIN_DIR "${EXTERNAL_ENGINE_ROOT}/plugins/${ENGINE_PLUGIN_ID}")
     list(APPEND ENGINE_PLUGIN_COPY_COMMANDS
             COMMAND ${CMAKE_COMMAND} -E make_directory "${EXTERNAL_ENGINE_ROOT}/plugins"

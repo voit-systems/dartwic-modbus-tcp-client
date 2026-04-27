@@ -1,5 +1,5 @@
 {
-  "copy_plugin": false,
-  "engine_dir": "C:\\Users\\kempt\\OneDrive\\Documents\\Github\\Repositories\\DARTWIC\\tests\\engine",
-  "interface_dir": "C:\\Users\\kempt\\OneDrive\\Documents\\Github\\Repositories\\DARTWIC\\tests\\interface"
+  "copy_plugin": true,
+  "engine_dir": "C:\\Users\\saint\\Documents\\Code\\Github\\DARTWIC\\tests\\engine",
+  "interface_dir": "C:\\Users\\saint\\Documents\\Code\\Github\\DARTWIC\\tests\\interface"
 }
