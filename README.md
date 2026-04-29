@@ -6,6 +6,7 @@ Modbus TCP plugin fixture for the DARTWIC plugin system.
 
 - `plugin.json`
   - single source manifest for the engine and interface sides
+  - declares `minEngineVersion` and `minInterfaceVersion`
 - `engine/`
   - source for the engine plugin DLL
   - `src/module_config.json` describes the module name, title, icon, and description
@@ -38,3 +39,9 @@ The outputs are written to:
 - It registers the Modbus task types on plugin load.
 - It exposes one repeatable module type: `modbus_tcp_client`.
 - Module instances live separately under `modules/*.json`.
+
+## Compatibility
+
+- engine loading is gated by `minEngineVersion`
+- interface loading is gated by `minInterfaceVersion`
+- both generated plugin output folders copy the root `plugin.json`

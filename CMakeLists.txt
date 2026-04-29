@@ -19,10 +19,10 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 
 file(READ "${PLUGIN_MANIFEST_FILE}" PLUGIN_MANIFEST_JSON)
 string(JSON ENGINE_PLUGIN_ID GET "${PLUGIN_MANIFEST_JSON}" id)
-string(JSON ENGINE_PLUGINS_API_VERSION GET "${PLUGIN_MANIFEST_JSON}" engine_plugins_api_version)
+string(JSON MIN_ENGINE_VERSION GET "${PLUGIN_MANIFEST_JSON}" minEngineVersion)
 string(JSON CONTAINS_ENGINE_PLUGIN GET "${PLUGIN_MANIFEST_JSON}" contains_engine_plugin)
-if(NOT ENGINE_PLUGINS_API_VERSION MATCHES "^[0-9]+$")
-    message(FATAL_ERROR "plugin.json engine_plugins_api_version must be an integer.")
+if("${MIN_ENGINE_VERSION}" STREQUAL "")
+    message(FATAL_ERROR "plugin.json must set minEngineVersion.")
 endif()
 if(NOT CONTAINS_ENGINE_PLUGIN)
     message(FATAL_ERROR "plugin.json must set contains_engine_plugin to true.")
