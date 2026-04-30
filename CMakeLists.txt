@@ -2,6 +2,12 @@ cmake_minimum_required(VERSION 3.30)
 project(modbus_tcp_client)
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
 
 if(MSVC)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
@@ -11,11 +17,9 @@ endif()
 
 set(ENGINE_DIR "${PROJECT_SOURCE_DIR}/engine")
 set(PLUGIN_MANIFEST_FILE "${PROJECT_SOURCE_DIR}/plugin.json")
-set(BUILD_CONFIGURATION_FILE "${PROJECT_SOURCE_DIR}/build-configuration.json")
 
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-        "${PLUGIN_MANIFEST_FILE}"
-        "${BUILD_CONFIGURATION_FILE}")
+        "${PLUGIN_MANIFEST_FILE}")
 
 file(READ "${PLUGIN_MANIFEST_FILE}" PLUGIN_MANIFEST_JSON)
 string(JSON ENGINE_PLUGIN_ID GET "${PLUGIN_MANIFEST_JSON}" id)
@@ -28,32 +32,13 @@ if(NOT CONTAINS_ENGINE_PLUGIN)
     message(FATAL_ERROR "plugin.json must set contains_engine_plugin to true.")
 endif()
 
-file(READ "${BUILD_CONFIGURATION_FILE}" BUILD_CONFIGURATION_JSON)
-string(JSON COPY_PLUGIN_VALUE ERROR_VARIABLE COPY_PLUGIN_ERROR GET "${BUILD_CONFIGURATION_JSON}" copy_plugin)
-if(COPY_PLUGIN_ERROR)
-    set(COPY_PLUGIN_VALUE true)
+string(TOLOWER "${CMAKE_BUILD_TYPE}" NORMALIZED_BUILD_TYPE)
+set(ENGINE_PLUGIN_VARIANT "engine")
+if(NORMALIZED_BUILD_TYPE STREQUAL "debug")
+    set(ENGINE_PLUGIN_VARIANT "engine-debug")
 endif()
 
-string(JSON EXTERNAL_ENGINE_ROOT ERROR_VARIABLE ENGINE_DIR_ERROR GET "${BUILD_CONFIGURATION_JSON}" engine_dir)
-if(ENGINE_DIR_ERROR)
-    set(EXTERNAL_ENGINE_ROOT "")
-endif()
-
-set(SHOULD_COPY_PLUGIN OFF)
-if(COPY_PLUGIN_VALUE)
-    set(SHOULD_COPY_PLUGIN ON)
-endif()
-
-set(SHOULD_COPY_EXTERNAL_ENGINE_PLUGIN OFF)
-if(SHOULD_COPY_PLUGIN AND NOT "${EXTERNAL_ENGINE_ROOT}" STREQUAL "")
-    if(IS_DIRECTORY "${EXTERNAL_ENGINE_ROOT}")
-        set(SHOULD_COPY_EXTERNAL_ENGINE_PLUGIN ON)
-    else()
-        message(WARNING "Skipping external engine plugin copy because engine_dir does not exist: ${EXTERNAL_ENGINE_ROOT}")
-    endif()
-endif()
-
-set(ENGINE_PLUGIN_DIR "${PROJECT_SOURCE_DIR}/plugin/engine/${ENGINE_PLUGIN_ID}")
+set(ENGINE_PLUGIN_DIR "${PROJECT_SOURCE_DIR}/plugin/${ENGINE_PLUGIN_VARIANT}/${ENGINE_PLUGIN_ID}")
 
 file(GLOB_RECURSE SRC_SOURCES "${ENGINE_DIR}/src/*.cpp")
 add_library(modbus_tcp_client_engine SHARED ${SRC_SOURCES})
@@ -75,13 +60,17 @@ target_link_libraries(modbus_tcp_client_engine PRIVATE
         nlohmann_json::nlohmann_json
 )
 
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE Release)
-endif()
-
 set_target_properties(modbus_tcp_client_engine PROPERTIES
         OUTPUT_NAME "${ENGINE_PLUGIN_ID}"
-        RUNTIME_OUTPUT_DIRECTORY "${ENGINE_PLUGIN_DIR}/bin")
+        RUNTIME_OUTPUT_DIRECTORY "${ENGINE_PLUGIN_DIR}/bin"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${ENGINE_PLUGIN_DIR}/bin"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${ENGINE_PLUGIN_DIR}/bin"
+        LIBRARY_OUTPUT_DIRECTORY "${ENGINE_PLUGIN_DIR}/bin"
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG "${ENGINE_PLUGIN_DIR}/bin"
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE "${ENGINE_PLUGIN_DIR}/bin"
+        PDB_OUTPUT_DIRECTORY "${ENGINE_PLUGIN_DIR}/bin"
+        PDB_OUTPUT_DIRECTORY_DEBUG "${ENGINE_PLUGIN_DIR}/bin"
+        PDB_OUTPUT_DIRECTORY_RELEASE "${ENGINE_PLUGIN_DIR}/bin")
 
 set(ENGINE_PLUGIN_COPY_COMMANDS
         COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_PLUGIN_DIR}"
@@ -95,13 +84,6 @@ set(ENGINE_PLUGIN_COPY_COMMANDS
         "${ENGINE_DIR}/src/default_parameters.json"
         "${ENGINE_PLUGIN_DIR}/default_parameters.json")
 
-if(SHOULD_COPY_EXTERNAL_ENGINE_PLUGIN)
-    set(EXTERNAL_ENGINE_PLUGIN_DIR "${EXTERNAL_ENGINE_ROOT}/plugins/${ENGINE_PLUGIN_ID}")
-    list(APPEND ENGINE_PLUGIN_COPY_COMMANDS
-            COMMAND ${CMAKE_COMMAND} -E make_directory "${EXTERNAL_ENGINE_ROOT}/plugins"
-            COMMAND ${CMAKE_COMMAND} -E copy_directory "${ENGINE_PLUGIN_DIR}" "${EXTERNAL_ENGINE_PLUGIN_DIR}")
-endif()
-
 add_custom_target(modbus_tcp_client ALL
         ${ENGINE_PLUGIN_COPY_COMMANDS}
         DEPENDS modbus_tcp_client_engine
@@ -109,3 +91,6 @@ add_custom_target(modbus_tcp_client ALL
 
 add_custom_target(copy_engine_plugin
         DEPENDS modbus_tcp_client)
+
+message(STATUS "Modbus engine plugin dir: ${ENGINE_PLUGIN_DIR}")
+message(STATUS "Modbus engine plugin variant: ${ENGINE_PLUGIN_VARIANT}")

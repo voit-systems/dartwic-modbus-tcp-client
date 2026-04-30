@@ -1,14 +1,12 @@
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { cp, mkdir, readFile, stat } from "node:fs/promises";
+import { cp, mkdir, readFile } from "node:fs/promises";
 import { defineConfig } from "vite";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const buildConfigurationPath = path.resolve(__dirname, "build-configuration.json");
 const sourceManifestPath = path.resolve(__dirname, "plugin.json");
-const buildConfiguration = JSON.parse(await readFile(buildConfigurationPath, "utf8"));
 const sourceManifest = JSON.parse(await readFile(sourceManifestPath, "utf8"));
 const pluginId = String(sourceManifest.id ?? "").trim();
 const releasePluginDir = path.resolve(__dirname, "plugin", "interface", pluginId);
@@ -16,19 +14,9 @@ const releaseUiDir = path.resolve(releasePluginDir, "ui");
 const releaseManifestPath = path.resolve(releasePluginDir, "plugin.json");
 const interfaceSourceDir = path.resolve(__dirname, "interface", "src");
 const runtimeEntryPath = path.resolve(interfaceSourceDir, "runtime.ts");
-const devInstallPluginDir = path.resolve(__dirname, "..", "DARTWIC", "tests", "interface", "plugins", pluginId);
 
 async function ensureDir(dirPath: string) {
   await mkdir(dirPath, { recursive: true });
-}
-
-async function directoryExists(dirPath: string) {
-  try {
-    const entry = await stat(dirPath);
-    return entry.isDirectory();
-  } catch {
-    return false;
-  }
 }
 
 async function copyDirectory(sourceDir: string, targetDir: string) {
@@ -43,24 +31,6 @@ function createDartwicPluginCopyPlugin() {
       await ensureDir(releaseUiDir);
       await cp(sourceManifestPath, releaseManifestPath, { force: true });
       await copyDirectory(interfaceSourceDir, path.resolve(releasePluginDir, "src"));
-
-      const localTargets = [releasePluginDir, devInstallPluginDir];
-      const externalPluginTargets: string[] = [];
-
-      if (buildConfiguration.copy_plugin !== false && buildConfiguration.interface_dir) {
-        const externalInterfaceRoot = path.resolve(buildConfiguration.interface_dir);
-        if (await directoryExists(externalInterfaceRoot)) {
-          externalPluginTargets.push(path.resolve(externalInterfaceRoot, "plugins", pluginId));
-        }
-      }
-
-      for (const target of localTargets.slice(1)) {
-        await copyDirectory(releasePluginDir, target);
-      }
-
-      for (const target of externalPluginTargets) {
-        await copyDirectory(releasePluginDir, target);
-      }
     }
   };
 }

@@ -1,12 +1,19 @@
 {
   "name": "modbus-tcp-client-plugin-interface",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "preversion": "node ./scripts/plugin-version.mjs --validate",
+    "version": "node ./scripts/plugin-version.mjs",
+    "package": "node ./scripts/plugin-package.mjs",
+    "deploy": "node ./scripts/plugin-deploy.mjs",
+    "deploy:engine-debug": "node ./scripts/plugin-deploy.mjs --engine-debug",
+    "deploy:debug": "node ./scripts/plugin-deploy.mjs --debug",
+    "deploy:interface": "node ./scripts/plugin-deploy.mjs --interface"
   },
   "dependencies": {
     "@dartwic/interface-sdk": "file:../DARTWIC/sdk/interface_plugin_sdk"

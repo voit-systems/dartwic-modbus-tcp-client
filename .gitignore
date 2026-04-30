@@ -4,3 +4,4 @@ plugin.zip
 .idea/
 node_modules/
 plugin/
+/build

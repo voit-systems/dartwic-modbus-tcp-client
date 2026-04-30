@@ -1,0 +1,6 @@
+{
+  "0.8.0": {
+    "minEngineVersion": "1.0.0-pre_release",
+    "minInterfaceVersion": "1.0.0-pre_release"
+  }
+}
