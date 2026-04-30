@@ -1,7 +1,9 @@
-cmake-build-release/
-cmake-build-debug/
-plugin.zip
-.idea/
+# Generated Files
+build/
 node_modules/
+vcpkg_installed/
 plugin/
-/build
+plugin.zip
+
+# Other
+.idea/
