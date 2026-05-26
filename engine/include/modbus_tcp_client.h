@@ -44,6 +44,9 @@ private:
     void checkConnection();
     void disconnect();
     void setConnected(double connected_value);
+    void configureConnectedChannel();
+    void closeContextAndSetDisconnected();
+    void handleOperationFailure(const std::string& operation_name);
 
     ModbusTCPClientModule* module_;
     std::string instance_name_;
