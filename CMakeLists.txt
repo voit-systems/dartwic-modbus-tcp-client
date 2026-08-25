@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.30)
 project(modbus_tcp_client)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -91,6 +93,20 @@ add_custom_target(modbus_tcp_client ALL
 
 add_custom_target(copy_engine_plugin
         DEPENDS modbus_tcp_client)
+
+if(BUILD_TESTING)
+    add_executable(modbus_read_write_integration
+            tests/modbus_read_write_integration.cpp
+            engine/src/modbus_tcp_client.cpp
+            engine/src/modbus_tcp_client_module.cpp)
+    target_include_directories(modbus_read_write_integration PRIVATE
+            "${ENGINE_DIR}/include"
+            ${ENGINE_INCLUDE_DIRS})
+    target_link_libraries(modbus_read_write_integration PRIVATE
+            modbus
+            nlohmann_json::nlohmann_json)
+    add_test(NAME modbus_read_write_integration COMMAND modbus_read_write_integration)
+endif()
 
 message(STATUS "Modbus engine plugin dir: ${ENGINE_PLUGIN_DIR}")
 message(STATUS "Modbus engine plugin variant: ${ENGINE_PLUGIN_VARIANT}")
