@@ -168,6 +168,10 @@ void configureTask(DARTWIC::API::SDK_API* api, DARTWIC::API::TaskRuntime& runtim
         createFixedChannel(api, mapping.channel);
         if (!mapping.readback_channel.empty()) createFixedChannel(api, mapping.readback_channel);
     }
+    std::vector<std::string> fixed_inputs;
+    fixed_inputs.reserve(writes.size());
+    for (const auto& mapping : writes) fixed_inputs.push_back(mapping.channel);
+    runtime.setFixedInputChannels(std::move(fixed_inputs));
     createFixedChannel(api, diagnosticChannel(runtime.getTaskName(), "transaction_time_ms"));
     createFixedChannel(api, diagnosticChannel(runtime.getTaskName(), "stale"), 1.0);
     createFixedChannel(api, diagnosticChannel(runtime.getTaskName(), "failure_count"));

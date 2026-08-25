@@ -35,6 +35,9 @@ public:
     const nlohmann::json& getArguments() const override { return arguments_; }
     double getElapsedSeconds() const override { return 0.0; }
     bool isStopRequested() const override { return false; }
+    void setFixedInputChannels(std::vector<std::string> channels) override {
+        fixed_input_channels_ = std::move(channels);
+    }
     void setRuntimeContext(const std::string& key, std::shared_ptr<void> value) override {
         contexts_[key] = std::move(value);
     }
@@ -50,6 +53,8 @@ private:
     nlohmann::json metadata_ = nlohmann::json::object();
     nlohmann::json arguments_;
     mutable std::unordered_map<std::string, std::shared_ptr<void>> contexts_;
+public:
+    std::vector<std::string> fixed_input_channels_;
 };
 
 class MockApi final : public SDK_API {
@@ -201,6 +206,8 @@ int main() {
         require(api.storage("sensor.pressure") == ChannelStorage::Fixed &&
             api.storage("command.valve") == ChannelStorage::Fixed,
             "Mapped Modbus channels were not configured Fixed");
+        require(runtime.fixed_input_channels_ == std::vector<std::string>{"command.valve"},
+            "Modbus configuration did not declare its fixed command snapshot");
         api.upsertChannelField("command.valve", ChannelField::VALUE, 55.0, ChannelStorage::Fixed);
         api.task_type.on_start(api.task_type, runtime);
         api.task_type.on_task(api.task_type, runtime, 0.01);
