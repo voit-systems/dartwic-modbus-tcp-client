@@ -1,62 +1,60 @@
-//
-// Created by kemptonburton on 11/16/2025.
-//
-
 #ifndef MODBUS_TCP_CLIENT_H
 #define MODBUS_TCP_CLIENT_H
 
 #include <modbus/modbus.h>
-#include <atomic>
+
+#include <chrono>
 #include <cstdint>
-#include <mutex>
-#include <optional>
 #include <string>
 #include <vector>
 
 class ModbusTCPClientModule;
 
+// The configured modbus.read_write task is the sole owner of this connection.
 class ModbusTCPClient {
 public:
     ModbusTCPClient(ModbusTCPClientModule* module,
         std::string instance_name,
         std::string server_ip,
         int server_port,
-        uint32_t tv_sec,
-        uint32_t tv_usec);
-
+        uint32_t timeout_seconds,
+        uint32_t timeout_microseconds);
     ~ModbusTCPClient();
 
-    bool isConnected() const;
+    bool ensureConnected();
+    bool isConnected() const noexcept { return connected_; }
+    void disconnect();
 
-    std::optional<int16_t> readInputRegister(int address);
-    std::optional<std::vector<int16_t>> readInputRegisterBlock(int start_address, int count);
-    std::vector<std::optional<int16_t>> readInputRegisters(const std::vector<int>& addresses);
-    bool writeCoil(int address, bool value);
-    bool writeCoilBlock(int start_address, const std::vector<uint8_t>& values);
+    bool readInputRegisters(int start_address, std::vector<uint16_t>& values);
+    bool readCoils(int start_address, std::vector<uint8_t>& values);
+    bool readHoldingRegisters(int start_address, std::vector<uint16_t>& values);
+    bool writeCoils(int start_address, const std::vector<uint8_t>& values);
+    bool writeHoldingRegisters(int start_address, const std::vector<uint16_t>& values);
 
-    std::optional<uint8_t> readCoil(int address);
-    std::optional<std::vector<uint8_t>> readCoilBlock(int start_address, int count);
-    bool writeHoldingRegisterBlock(int start_address, const std::vector<uint16_t>& values);
-    std::optional<std::vector<uint16_t>> readHoldingRegisterBlock(int start_address, int count);
+    uint64_t reconnectCount() const noexcept { return reconnect_count_; }
+    uint64_t failureCount() const noexcept { return failure_count_; }
 
 private:
     bool connect();
-    void checkConnection();
-    void disconnect();
-    void setConnected(double connected_value);
+    void setConnected(bool connected);
     void configureConnectedChannel();
     void closeContextAndSetDisconnected();
     void handleOperationFailure(const std::string& operation_name);
+    void publishConnectionError(const std::string& error_message);
+    void publishOperationError(const std::string& operation_name, const std::string& error_message);
 
     ModbusTCPClientModule* module_;
     std::string instance_name_;
     std::string server_ip_;
     int server_port_{};
-    modbus_t* ctx_{};
-    std::mutex ctx_lock_;
-    uint32_t tv_sec_{};
-    uint32_t tv_usec_{};
-    std::atomic<bool> connected_{false};
+    modbus_t* context_{};
+    uint32_t timeout_seconds_{};
+    uint32_t timeout_microseconds_{};
+    bool connected_{false};
+    uint64_t reconnect_count_{0};
+    uint64_t failure_count_{0};
+    std::chrono::steady_clock::time_point next_reconnect_attempt_{};
+    std::chrono::steady_clock::time_point last_error_publication_{};
 };
 
-#endif //MODBUS_TCP_CLIENT_H
+#endif

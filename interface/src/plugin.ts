@@ -1,18 +1,22 @@
 import { definePlugin } from "@dartwic/interface-sdk";
 import { moduleConfigs } from "./moduleConfigs";
-import { pluginSettings } from "./pluginSettings";
-import { resources } from "./resources";
-import { schematicNodes } from "./schematicNodes";
 import { taskCards } from "./taskCards";
 import { taskConfigs } from "./taskConfigs";
 
 export default definePlugin({
-  id: "modbus_tcp_client",
+  id: "modbus",
   name: "Modbus TCP Client",
-  taskCards,
-  taskConfigs,
-  resources,
-  pluginSettings,
-  moduleConfigs,
-  schematicNodes,
+  register(registry) {
+    registry.addTaskUi({
+      id: "read_write",
+      name: "Modbus Read / Write",
+      card: taskCards[0].component,
+      editor: taskConfigs[0].component,
+    });
+    registry.addModuleUi({
+      id: "tcp_client",
+      name: "Modbus TCP Client",
+      panel: moduleConfigs[0].component,
+    });
+  },
 });

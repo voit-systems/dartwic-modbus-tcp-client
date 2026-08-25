@@ -16,7 +16,7 @@ public:
 
     ModbusTCPClient& getTCPClient();
 
-    ~ModbusTCPClientModule() override;
+    ~ModbusTCPClientModule() override = default;
 
 private:
     std::string instance_name_;

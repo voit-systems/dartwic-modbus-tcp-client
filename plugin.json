@@ -1,9 +1,9 @@
 {
-  "id": "modbus_tcp_client",
+  "id": "modbus",
   "name": "Modbus TCP Client Plugin",
-  "version": "0.9.0",
-  "minEngineVersion": "1.0.0-pre_release",
-  "minInterfaceVersion": "1.0.0-pre_release",
+  "version": "1.0.0",
+  "minEngineVersion": "2.0.0-beta.1",
+  "minInterfaceVersion": "2.0.0-beta.1",
   "contains_engine_plugin": true,
   "contains_interface_plugin": true
 }
