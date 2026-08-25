@@ -342,6 +342,8 @@ DARTWIC::Modules::BaseModule* ModbusTCPClientPlugin::createModule(
     return new ModbusTCPClientModule(std::move(cfg), api);
 }
 
+DARTWIC_PLUGIN_DECLARE_SDK_ABI()
+
 DARTWIC_PLUGIN_EXPORT DARTWIC::Plugins::BasePlugin* createPlugin(
     nlohmann::json cfg,
     DARTWIC::API::SDK_API* api) {
