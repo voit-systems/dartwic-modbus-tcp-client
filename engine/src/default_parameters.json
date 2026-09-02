@@ -1,6 +1,9 @@
 {
   "server_ip": "127.0.0.1",
   "server_port": 502,
+  "unit_id": 255,
   "tv_sec": 3,
-  "tv_usec": 0
+  "tv_usec": 0,
+  "event_system": "SOFTWARE",
+  "event_subsystem": "MODBUS"
 }

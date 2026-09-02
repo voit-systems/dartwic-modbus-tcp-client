@@ -1,9 +1,36 @@
 {
-  "id": "modbus",
+  "id": "modbus_tcp_client",
   "name": "Modbus TCP Client Plugin",
   "version": "1.0.0",
-  "minEngineVersion": "2.0.0-beta.1",
-  "minInterfaceVersion": "2.0.0-beta.1",
+  "minEngineVersion": "2.0.0-beta.2",
+  "minInterfaceVersion": "2.0.0-beta.2",
   "contains_engine_plugin": true,
-  "contains_interface_plugin": true
+  "contains_interface_plugin": true,
+  "device_discovery": {
+    "enabled": true,
+    "network_scan": {
+      "enabled": true,
+      "include_local_subnets": true,
+      "subnets": [],
+      "ports": [502],
+      "unit_ids": [1, 255],
+      "probe_timeout_ms": 50,
+      "hosts_per_tick": 8,
+      "max_hosts_per_subnet": 254,
+      "minimum_prefix_length": 24,
+      "rescan_interval_seconds": 300
+    },
+    "targets": [
+      {
+        "host": "127.0.0.1",
+        "port": 502,
+        "unit_ids": [1, 255],
+        "start_address": 0,
+        "end_address": 255,
+        "timeout_ms": 100,
+        "scan_all_unit_ids": false,
+        "auto_map_responding_addresses": true
+      }
+    ]
+  }
 }

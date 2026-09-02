@@ -58,8 +58,13 @@ Build behavior:
 ## Runtime Model
 
 - The engine plugin is a singleton plugin object loaded from `plugins/modbus_tcp_client`.
+- Its one Caesar discovery loop checks explicit `device_discovery.targets` and can also sweep bounded local or configured IPv4 CIDRs from `device_discovery.network_scan`. Closed ports are rejected by a short TCP probe before any read-only Modbus requests are sent.
+- Automatic local scanning defaults to port `502`, a `/24` minimum prefix, and at most 254 hosts per subnet. Additional CIDRs, ports, unit IDs, timeout, and host limit are configurable from the plugin settings page. No discovery request writes to a Modbus device.
 - It registers the Modbus task types on plugin load.
-- It exposes one repeatable module type: `modbus_tcp_client`.
+- It exposes local module type `tcp_client`, qualified by DARTWIC as
+  `modbus_tcp_client.tcp_client`.
+- It exposes task types `modbus_tcp_client.read` and
+  `modbus_tcp_client.write`.
 - Module instances live separately under `modules/*.json`.
 
 ## Compatibility

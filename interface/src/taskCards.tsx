@@ -5,26 +5,25 @@ import { convertChannelReferenceToChannelName } from "@dartwic/interface-sdk/ui/
 import { normalizeReadMappings, normalizeWriteMappings } from "./shared";
 
 function ModbusTaskCard({ task }: { task: any }) {
-  const reads = normalizeReadMappings(task.arguments, convertChannelReferenceToChannelName);
-  const writes = normalizeWriteMappings(task.arguments, convertChannelReferenceToChannelName);
+  const isReadTask = task.task_type === "modbus_tcp_client.read";
+  const mappingCount = isReadTask
+    ? normalizeReadMappings(task.arguments, convertChannelReferenceToChannelName).length
+    : normalizeWriteMappings(task.arguments, convertChannelReferenceToChannelName).length;
   return <>
     <Separator />
-    <div className="grid grid-cols-3 gap-2 text-xs">
+    <div className="grid grid-cols-2 gap-2 text-xs">
       <div className="rounded-md border bg-muted/40 px-3 py-2">
         <div className="text-muted-foreground">CONNECTION</div>
         <div className="truncate">{task.arguments?.module_instance_name || "UNBOUND"}</div>
       </div>
       <div className="rounded-md border bg-muted/40 px-3 py-2">
-        <div className="text-muted-foreground">READS</div><div>{reads.length}</div>
-      </div>
-      <div className="rounded-md border bg-muted/40 px-3 py-2">
-        <div className="text-muted-foreground">WRITES</div><div>{writes.length}</div>
+        <div className="text-muted-foreground">{isReadTask ? "READS" : "WRITES"}</div><div>{mappingCount}</div>
       </div>
     </div>
-    <div className="text-xs text-muted-foreground">Cycle order: write previous commands, then read and commit sensors.</div>
   </>;
 }
 
 export const taskCards = [
-  defineTaskCard({ taskType: "modbus.read_write", component: ModbusTaskCard }),
+  defineTaskCard({ taskType: "modbus_tcp_client.read", component: ModbusTaskCard }),
+  defineTaskCard({ taskType: "modbus_tcp_client.write", component: ModbusTaskCard }),
 ];

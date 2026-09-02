@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { cp, mkdir, readFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm } from "node:fs/promises";
 import { defineConfig } from "vite";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,18 +19,15 @@ async function ensureDir(dirPath: string) {
   await mkdir(dirPath, { recursive: true });
 }
 
-async function copyDirectory(sourceDir: string, targetDir: string) {
-  await ensureDir(path.dirname(targetDir));
-  await cp(sourceDir, targetDir, { recursive: true, force: true });
-}
-
 function createDartwicPluginCopyPlugin() {
   return {
     name: "dartwic-plugin-copy",
     async writeBundle() {
       await ensureDir(releaseUiDir);
       await cp(sourceManifestPath, releaseManifestPath, { force: true });
-      await copyDirectory(interfaceSourceDir, path.resolve(releasePluginDir, "src"));
+      // Installed interface plugins contain only their manifest and compiled
+      // runtime. Source remains exclusively in this plugin repository.
+      await rm(path.resolve(releasePluginDir, "src"), { recursive: true, force: true });
     }
   };
 }

@@ -6,39 +6,25 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <variant>
 #include <vector>
+
+namespace DARTWIC::Share {
+    class ShareTransport;
+    using ShareTransportPtr = std::shared_ptr<ShareTransport>;
+}
 
 namespace DARTWIC::Modules {
     class BaseModule;
 }
 
 namespace DARTWIC::API {
-    /**
-     * Engine-side link used by a Share type.
-     *
-     * A Share type only moves complete JSON frames. The engine owns RAPID and
-     * ARGUS synchronization, routing, diagnostics, and protocol semantics.
-     */
-    class ShareTransport {
-    public:
-        using ReceiveHandler = std::function<void(nlohmann::json frame)>;
-
-        virtual ~ShareTransport() = default;
-        virtual void start(ReceiveHandler receive) = 0;
-        virtual bool send(const nlohmann::json& frame) = 0;
-        virtual bool sendBatch(const std::vector<nlohmann::json>& frames) {
-            for (const auto& frame : frames) {
-                if (!send(frame)) return false;
-            }
-            return true;
-        }
-        virtual void stop() = 0;
-    };
-
-    using ShareTransportPtr = std::shared_ptr<ShareTransport>;
+    /** DARTWIC Share Protocol transport SPI used by engine Share transports. */
+    using ShareTransport = DARTWIC::Share::ShareTransport;
+    using ShareTransportPtr = DARTWIC::Share::ShareTransportPtr;
 
     /**
      * Execution shape used by a registered task type.
@@ -114,6 +100,23 @@ namespace DARTWIC::API {
     enum class ChannelStorage {
         Dynamic,
         Fixed
+    };
+
+    /** Stable, pre-resolved address of a fixed RAPID channel. */
+    struct FixedChannelHandle {
+        uint32_t slot = 0;
+        uint64_t binding_generation = 0;
+
+        [[nodiscard]] bool valid() const noexcept { return binding_generation != 0; }
+    };
+
+    /** Ordered channel names and handles used by the fixed-channel batch APIs. */
+    struct FixedChannelBatch {
+        std::vector<std::string> channels;
+        std::vector<FixedChannelHandle> handles;
+
+        [[nodiscard]] size_t size() const noexcept { return handles.size(); }
+        [[nodiscard]] bool empty() const noexcept { return handles.empty(); }
     };
 
     /**
@@ -329,7 +332,7 @@ namespace DARTWIC::API {
      * DARTWICShare continues to own channel/event synchronization and routing;
      * the factory only creates the network link used by a configured connection.
      */
-    struct ShareTypeDefinition {
+    struct ShareTransportDefinition {
         std::string id;
         std::string name;
         nlohmann::json default_config = nlohmann::json::object();
@@ -425,7 +428,7 @@ namespace DARTWIC::API {
          * @returns The plugin-qualified module type identifier.
          */
         virtual std::string registerModuleType(ModuleTypeDefinition definition) = 0;
-        virtual std::string registerShareType(ShareTypeDefinition definition) = 0;
+        virtual std::string registerShareTransport(ShareTransportDefinition definition) = 0;
         /**
          * Registers a plugin-local task type and returns its qualified identifier.
          * @dartwic-reference
@@ -563,6 +566,58 @@ namespace DARTWIC::API {
          * @param channel Flat channel name.
          */
         virtual void freeChannel(const std::string& channel) = 0;
+
+        /**
+         * Creates or refreshes a correlated ARGUS event from a JSON declaration.
+         *
+         * Supported fields include type, title, description, resolution, system,
+         * subsystem, channels, actions, payload, correlation_key, and
+         * auto_acknowledge_seconds. A stable correlation_key updates one event
+         * instead of creating a new event for each heartbeat.
+         *
+         * @dartwic-reference
+         * @category Events
+         * @returns The complete accepted ARGUS event record.
+         */
+        virtual nlohmann::json recordEvent(nlohmann::json event) { return nlohmann::json::object(); }
+
+        /** Updates the lifecycle status of an ARGUS event by event identifier. */
+        virtual bool updateEventStatus(const std::string& event_id, const std::string& status) {
+            (void)event_id;
+            (void)status;
+            return false;
+        }
+
+        virtual FixedChannelBatch resolveFixedChannels(const std::vector<std::string>& channels) = 0;
+        virtual void queryFixedChannelValues(const FixedChannelBatch& batch,
+            std::span<double> destination,
+            double default_value = 0.0) = 0;
+        virtual void upsertFixedChannelValues(const FixedChannelBatch& batch,
+            std::span<const double> values,
+            std::optional<uint64_t> timestamp = std::nullopt) = 0;
+
+        /** Opens or updates a named interface workflow and returns its request descriptor. */
+        virtual nlohmann::json requestInterfaceUi(
+            const std::string& ui_id,
+            nlohmann::json payload,
+            nlohmann::json options = nlohmann::json::object()) {
+            (void)ui_id;
+            (void)payload;
+            (void)options;
+            return nlohmann::json::object();
+        }
+
+        /** Returns the current status and result for a named interface workflow request. */
+        virtual nlohmann::json getInterfaceUiRequest(const std::string& request_id) {
+            (void)request_id;
+            return nlohmann::json::object();
+        }
+
+        /** Announces a device found by a plugin-owned discovery loop. */
+        virtual nlohmann::json announceDiscoveredDevice(nlohmann::json candidate) {
+            (void)candidate;
+            return nlohmann::json::object();
+        }
     };
 }
 

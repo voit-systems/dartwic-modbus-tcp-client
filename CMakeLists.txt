@@ -62,6 +62,10 @@ target_link_libraries(modbus_tcp_client_engine PRIVATE
         nlohmann_json::nlohmann_json
 )
 
+if(WIN32)
+    target_link_libraries(modbus_tcp_client_engine PRIVATE iphlpapi ws2_32)
+endif()
+
 set_target_properties(modbus_tcp_client_engine PROPERTIES
         OUTPUT_NAME "${ENGINE_PLUGIN_ID}"
         RUNTIME_OUTPUT_DIRECTORY "${ENGINE_PLUGIN_DIR}/bin"
@@ -98,14 +102,32 @@ if(BUILD_TESTING)
     add_executable(modbus_read_write_integration
             tests/modbus_read_write_integration.cpp
             engine/src/modbus_tcp_client.cpp
-            engine/src/modbus_tcp_client_module.cpp)
+            engine/src/modbus_tcp_client_module.cpp
+            engine/src/modbus_device_discovery.cpp
+            engine/src/modbus_register_scanner.cpp)
     target_include_directories(modbus_read_write_integration PRIVATE
             "${ENGINE_DIR}/include"
             ${ENGINE_INCLUDE_DIRS})
     target_link_libraries(modbus_read_write_integration PRIVATE
             modbus
             nlohmann_json::nlohmann_json)
+    if(WIN32)
+        target_link_libraries(modbus_read_write_integration PRIVATE iphlpapi ws2_32)
+    endif()
     add_test(NAME modbus_read_write_integration COMMAND modbus_read_write_integration)
+
+    add_executable(modbus_live_probe tests/modbus_live_probe.cpp)
+    target_link_libraries(modbus_live_probe PRIVATE modbus)
+
+    add_executable(modbus_register_scan_integration
+            tests/modbus_register_scan_integration.cpp
+            engine/src/modbus_register_scanner.cpp)
+    target_include_directories(modbus_register_scan_integration PRIVATE
+            "${ENGINE_DIR}/include")
+    target_link_libraries(modbus_register_scan_integration PRIVATE
+            modbus
+            nlohmann_json::nlohmann_json)
+    add_test(NAME modbus_register_scan_integration COMMAND modbus_register_scan_integration)
 endif()
 
 message(STATUS "Modbus engine plugin dir: ${ENGINE_PLUGIN_DIR}")

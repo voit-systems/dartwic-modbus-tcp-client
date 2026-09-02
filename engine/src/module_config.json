@@ -2,5 +2,5 @@
   "name": "tcp_client",
   "title": "Modbus TCP Client",
   "icon": "https://upload.wikimedia.org/wikipedia/commons/d/da/Logo_of_Modbus.svg",
-  "description": "Creates one Modbus TCP connection owned by a single combined read/write CAESAR task."
+  "description": "Creates one Modbus TCP connection shared by at most one read task and one write task."
 }

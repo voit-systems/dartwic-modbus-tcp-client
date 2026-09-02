@@ -6,6 +6,7 @@ export interface MappingRowValue {
 }
 
 export const readRegisterTypes = [
+  { value: "discrete_input", label: "DISCRETE INPUT" },
   { value: "input_register", label: "INPUT REGISTER" },
   { value: "holding_register", label: "HOLDING REGISTER" },
   { value: "coil", label: "COIL" },
