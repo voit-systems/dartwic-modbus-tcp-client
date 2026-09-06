@@ -275,8 +275,11 @@ nlohmann::json suggestionGroup(const nlohmann::json& table, const char* id, cons
 }
 
 ModbusDeviceFinder::ModbusDeviceFinder(DARTWIC::API::SDK_API* api, const nlohmann::json& plugin_config,
-    std::function<nlohmann::json(const nlohmann::json&)> scanner)
-    : api_(api), scanner_(std::move(scanner)) {
+    std::function<nlohmann::json(const nlohmann::json&)> scanner, std::function<std::int64_t()> clock)
+    : api_(api), scanner_(std::move(scanner)), clock_(clock ? std::move(clock) : [] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }) {
     const auto discovery = plugin_config.value("device_discovery", nlohmann::json::object());
     if (!discovery.value("enabled", true)) return;
     const auto network_scan = discovery.value("network_scan", nlohmann::json::object());
@@ -424,8 +427,63 @@ void ModbusDeviceFinder::probeNetworkEndpoints() {
 }
 
 void ModbusDeviceFinder::forgetAnnouncement(const std::string& discovery_id) {
+    presence_.erase(discovery_id);
     request_ids_.erase(discovery_id);
     announced_ids_.erase(std::remove(announced_ids_.begin(), announced_ids_.end(), discovery_id), announced_ids_.end());
+}
+
+void ModbusDeviceFinder::updatePresence(const std::string& discovery_id, const bool available) {
+    const auto found = request_ids_.find(discovery_id);
+    if (found == request_ids_.end()) return;
+    const auto request = api_->getInterfaceUiRequest(found->second);
+    if (request.value("status", "pending") != "pending") return;
+    auto payload = request.at("payload");
+    payload["presence"] = {{"available", available},
+        {"valid_until_unix_ms", available ? clock_() + 15000 : 0}};
+    // Update the existing request, not a new notification. The discovery UI
+    // consumes this generic presence lease, including when telemetry is missed.
+    api_->requestInterfaceUi("dartwic.module-discovery", std::move(payload), {
+        {"request_key", discovery_id}, {"merge_key", "module-discovery"},
+        {"silenceable", true}, {"mute_scope", "engine"},
+        {"notification_id", "modbus_tcp_client:device-discovery:" + discovery_id},
+        {"reopen_completed", false}
+    });
+}
+
+void ModbusDeviceFinder::withdrawAnnouncement(const std::string& discovery_id) {
+    updatePresence(discovery_id, false);
+    forgetAnnouncement(discovery_id);
+}
+
+void ModbusDeviceFinder::revalidateAnnouncements() {
+    // Work on a copy: mute callbacks and withdrawals erase presence entries.
+    const auto pending = presence_;
+    for (const auto& [id, presence] : pending) {
+        if (clock_() < presence.next_check) continue;
+        try {
+            if (hasConfiguredModule(presence.target, presence.unit_id) || isDiscoveryMuted(id)) {
+                withdrawAnnouncement(id);
+                continue;
+            }
+            bool available = false;
+            try {
+                // Four one-address Modbus reads (not just an open TCP port), on
+                // the unit that originally answered. Do not repeat the full map.
+                available = scanner_({{"server_ip", presence.target.host}, {"server_port", presence.target.port},
+                    {"unit_id", presence.unit_id}, {"start_address", presence.target.start_address},
+                    {"end_address", presence.target.start_address}, {"timeout_ms", presence.target.timeout_ms}}).is_object();
+            } catch (...) { /* A lost connection withdraws its offer. */ }
+            if (!available || isDiscoveryMuted(id) || hasConfiguredModule(presence.target, presence.unit_id)) {
+                withdrawAnnouncement(id);
+            } else {
+                updatePresence(id, true);
+                if (presence_.contains(id)) presence_.at(id).next_check = clock_() + 5000;
+            }
+        } catch (...) {
+            // Broker/preference failures cannot extend the last verified lease.
+            // Retry next tick; the UI independently expires the old offer.
+        }
+    }
 }
 
 bool ModbusDeviceFinder::isDiscoveryMuted(const std::string& discovery_id) {
@@ -433,7 +491,7 @@ bool ModbusDeviceFinder::isDiscoveryMuted(const std::string& discovery_id) {
     try {
         auto [handle, inserted] = mute_handles_.try_emplace(discovery_id,
             "device-discovery:" + discovery_id,
-            [this, discovery_id] { forgetAnnouncement(discovery_id); },
+            [this, discovery_id] { withdrawAnnouncement(discovery_id); },
             [this, discovery_id] {
                 forgetAnnouncement(discovery_id);
                 // A muted network endpoint may never have become a Target.
@@ -476,6 +534,7 @@ void ModbusDeviceFinder::reconcileAnnouncements() {
             // A terminal UI request is not proof that the endpoint is configured.
             // Live module configuration is checked separately on every finder pass.
             request_ids_.erase(request_id);
+            presence_.erase(*announced);
             announced = announced_ids_.erase(announced);
         } catch (const std::exception&) {
             // Preserve the announcement on transient broker failures to avoid duplicate prompts.
@@ -510,6 +569,7 @@ void ModbusDeviceFinder::tick() {
         catch (...) { /* Per-endpoint checks below defer work until state is readable. */ }
     }
     reconcileAnnouncements();
+    revalidateAnnouncements();
     probeNetworkEndpoints();
     if (targets_.empty()) return;
     const auto& target = targets_[target_index_];
@@ -653,6 +713,8 @@ nlohmann::json ModbusDeviceFinder::configureAddressRange(const nlohmann::json& r
         target.start_address = start_address;
         target.end_address = end_address;
     }
+    const auto old_announcements = announced_ids_;
+    for (const auto& id : old_announcements) withdrawAnnouncement(id);
     announced_ids_.clear();
     request_ids_.clear();
     mute_handles_.clear();
@@ -746,6 +808,7 @@ void ModbusDeviceFinder::announce(const Target& target, int unit_id, const nlohm
     }
 
     auto discovery_request = api_->requestInterfaceUi("dartwic.module-discovery", {
+        {"presence", {{"available", true}, {"valid_until_unix_ms", clock_() + 15000}}},
         {"discovery_id", discovery_id},
         {"device_type", "modbus_tcp"},
         {"display_name", "Modbus TCP Module"},
@@ -807,6 +870,7 @@ void ModbusDeviceFinder::announce(const Target& target, int unit_id, const nlohm
     if (request_id.empty()) throw std::runtime_error("The interface request broker did not return a request ID.");
     request_ids_[discovery_id] = request_id;
     announced_ids_.push_back(discovery_id);
+    presence_.insert_or_assign(discovery_id, Presence{target, unit_id, clock_() + 5000});
 }
 
 std::shared_ptr<ModbusDeviceFinder> createModbusDeviceFinder(

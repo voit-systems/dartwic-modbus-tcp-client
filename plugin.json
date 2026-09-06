@@ -3,7 +3,7 @@
   "name": "Modbus TCP Client Plugin",
   "version": "1.0.1",
   "minEngineVersion": "2.0.0-beta.4",
-  "minInterfaceVersion": "2.0.0-beta.2",
+  "minInterfaceVersion": "2.0.0-beta.4",
   "contains_engine_plugin": true,
   "contains_interface_plugin": true,
   "device_discovery": {

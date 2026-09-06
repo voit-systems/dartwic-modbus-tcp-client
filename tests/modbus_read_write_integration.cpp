@@ -69,6 +69,7 @@ public:
     bool discovery_muted{false};
     bool mute_lookup_failed{false};
     int discovery_requests{0};
+    int presence_updates{0};
     nlohmann::json discovery_request;
     bool isNotificationMuted(const std::string& id) override {
         if (id != "device-discovery:127.0.0.1:15099") throw std::runtime_error("Unexpected notification identity");
@@ -76,7 +77,8 @@ public:
         return discovery_muted;
     }
     nlohmann::json requestInterfaceUi(const std::string& ui, nlohmann::json payload, nlohmann::json options) override {
-        ++discovery_requests;
+        if (options.value("reopen_completed", false)) ++discovery_requests;
+        else ++presence_updates;
         discovery_request = {{"request_id", "discovery-test"}, {"ui_id", ui},
             {"payload", std::move(payload)}, {"options", std::move(options)}, {"status", "pending"}, {"muted", false}};
         return discovery_request;
@@ -355,6 +357,8 @@ void testDiscoveryLifecycle() {
     MockApi api;
     int scans = 0;
     bool mute_during_scan = false;
+    bool online = true;
+    std::int64_t now = 100000;
     const nlohmann::json config = {{"device_discovery", {
         {"network_scan", {{"enabled", false}}},
         {"targets", nlohmann::json::array({{{"host", "127.0.0.1"}, {"port", 15099}, {"unit_ids", {1}},
@@ -362,9 +366,10 @@ void testDiscoveryLifecycle() {
     }}};
     ModbusDeviceFinder finder(&api, config, [&](const nlohmann::json&) {
         ++scans;
+        if (!online) throw std::runtime_error("Simulator is offline");
         if (mute_during_scan) api.discovery_muted = true;
         return nlohmann::json{{"scanned", {{"start_address", 0}, {"end_address", 1}}}};
-    });
+    }, [&] { return now; });
     api.discovery_muted = true;
     finder.tick();
     finder.tick();
@@ -383,6 +388,8 @@ void testDiscoveryLifecycle() {
     finder.tick();
     finder.tick();
     require(scans == 1 && api.discovery_requests == 1, "Mute callback must suppress subsequent work");
+    require(api.discovery_request["payload"]["presence"]["available"] == false,
+        "Mute must withdraw the live offer, not keep claiming a device exists");
     api.discovery_muted = false;
     finder.tick();
     require(scans == 2 && api.discovery_requests == 2, "Unmute callback must permit one fresh offer");
@@ -405,6 +412,36 @@ void testDiscoveryLifecycle() {
     mute_during_scan = false;
     finder.tick();
     require(scans == 4 && api.discovery_requests == 3, "Removed device can be rediscovered after unmute");
+    require(api.discovery_request["payload"]["presence"]["valid_until_unix_ms"] == now + 15000,
+        "A discovery must carry a bounded presence lease");
+    now += 5000;
+    finder.tick();
+    require(api.discovery_requests == 3 && scans == 5,
+        "Pending discovery must revalidate without repeating the full announcement");
+    require(api.discovery_request["payload"]["presence"]["valid_until_unix_ms"] == now + 15000,
+        "Successful Modbus verification renews the presence lease");
+    online = false;
+    now += 5000;
+    finder.tick();
+    require(api.discovery_request["payload"]["presence"]["available"] == false,
+        "Turning off the simulator must withdraw its pending offer");
+    const auto requests_while_offline = api.discovery_requests;
+    finder.tick();
+    require(api.discovery_requests == requests_while_offline, "Offline devices cannot reannounce");
+    api.discovery_muted = true;
+    const auto scans_while_muted = scans;
+    finder.tick();
+    now += 120000;
+    finder.tick();
+    require(scans == scans_while_muted && api.discovery_requests == requests_while_offline,
+        "Muted offline devices must remain absent without probing");
+    api.discovery_muted = false;
+    finder.tick();
+    require(api.discovery_requests == requests_while_offline, "Unmuting an offline device must not resurrect it");
+    online = true;
+    finder.tick();
+    require(api.discovery_requests == requests_while_offline + 1,
+        "Only a new successful scan may rediscover a returning simulator");
     std::cout << "Discovery mute/configuration lifecycle passed." << std::endl;
 }
 } // namespace
