@@ -6,6 +6,7 @@
 
 #include "modbus_tcp_client_module.h"
 #include "modbus_tcp_client_plugin.h"
+#include "modbus_device_discovery.h"
 
 #include <modbus/modbus.h>
 
@@ -65,6 +66,22 @@ public:
 
 class MockApi final : public SDK_API {
 public:
+    bool discovery_muted{false};
+    bool mute_lookup_failed{false};
+    int discovery_requests{0};
+    nlohmann::json discovery_request;
+    bool isNotificationMuted(const std::string& id) override {
+        if (id != "device-discovery:127.0.0.1:15099") throw std::runtime_error("Unexpected notification identity");
+        if (mute_lookup_failed) throw std::runtime_error("Preference store unavailable");
+        return discovery_muted;
+    }
+    nlohmann::json requestInterfaceUi(const std::string& ui, nlohmann::json payload, nlohmann::json options) override {
+        ++discovery_requests;
+        discovery_request = {{"request_id", "discovery-test"}, {"ui_id", ui},
+            {"payload", std::move(payload)}, {"options", std::move(options)}, {"status", "pending"}, {"muted", false}};
+        return discovery_request;
+    }
+    nlohmann::json getInterfaceUiRequest(const std::string&) override { return discovery_request; }
     double queryChannelField(const std::string& channel, ChannelField,
         std::optional<ChannelValue> fallback) override {
         std::scoped_lock lock(mutex_);
@@ -333,10 +350,68 @@ private:
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
+
+void testDiscoveryLifecycle() {
+    MockApi api;
+    int scans = 0;
+    bool mute_during_scan = false;
+    const nlohmann::json config = {{"device_discovery", {
+        {"network_scan", {{"enabled", false}}},
+        {"targets", nlohmann::json::array({{{"host", "127.0.0.1"}, {"port", 15099}, {"unit_ids", {1}},
+            {"start_address", 0}, {"end_address", 1}}})}
+    }}};
+    ModbusDeviceFinder finder(&api, config, [&](const nlohmann::json&) {
+        ++scans;
+        if (mute_during_scan) api.discovery_muted = true;
+        return nlohmann::json{{"scanned", {{"start_address", 0}, {"end_address", 1}}}};
+    });
+    api.discovery_muted = true;
+    finder.tick();
+    finder.tick();
+    require(scans == 0 && api.discovery_requests == 0, "Muted discovery must not scan or announce");
+    api.discovery_muted = false;
+    finder.tick();
+    require(scans == 1 && api.discovery_requests == 1, "Unmute must offer the device exactly once");
+    const auto& options = api.discovery_request["options"];
+    require(options["silenceable"] == true && options["mute_scope"] == "engine",
+        "Discovery must expose engine-scoped mute");
+    require(options["notification_id"] == "modbus_tcp_client:device-discovery:127.0.0.1:15099",
+        "Discovery and mute lookup identities must match");
+    finder.tick();
+    require(scans == 1 && api.discovery_requests == 1, "Pending discovery must not repeat");
+    api.discovery_muted = true;
+    finder.tick();
+    finder.tick();
+    require(scans == 1 && api.discovery_requests == 1, "Mute callback must suppress subsequent work");
+    api.discovery_muted = false;
+    finder.tick();
+    require(scans == 2 && api.discovery_requests == 2, "Unmute callback must permit one fresh offer");
+    api.discovery_request["status"] = "completed";
+    api.modules["renamed"] = std::make_shared<DARTWIC::Modules::BaseModule>(
+        nlohmann::json{{"parameters", {{"server_ip", "127.0.0.1"}, {"server_port", 15099}, {"unit_id", 1}}}}, &api);
+    api.module_summaries.push_back({"renamed", "modbus_tcp_client", "tcp_client", ""});
+    finder.tick();
+    require(scans == 2 && api.discovery_requests == 2, "Configured device must not be offered again");
+    api.modules.clear();
+    api.module_summaries.clear();
+    mute_during_scan = true;
+    finder.tick();
+    require(scans == 3 && api.discovery_requests == 2, "Mute during scan must prevent announcement");
+    api.discovery_muted = false;
+    api.mute_lookup_failed = true;
+    finder.tick();
+    require(scans == 3 && api.discovery_requests == 2, "Unknown mute state must defer discovery");
+    api.mute_lookup_failed = false;
+    mute_during_scan = false;
+    finder.tick();
+    require(scans == 4 && api.discovery_requests == 3, "Removed device can be rediscovered after unmute");
+    std::cout << "Discovery mute/configuration lifecycle passed." << std::endl;
+}
 } // namespace
 
 int main() {
     try {
+        testDiscoveryLifecycle();
         const int port = 15000 + static_cast<int>(
             std::chrono::steady_clock::now().time_since_epoch().count() % 1000);
         Simulator simulator(port);

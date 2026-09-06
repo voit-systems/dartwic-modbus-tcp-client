@@ -274,8 +274,9 @@ nlohmann::json suggestionGroup(const nlohmann::json& table, const char* id, cons
 }
 }
 
-ModbusDeviceFinder::ModbusDeviceFinder(DARTWIC::API::SDK_API* api, const nlohmann::json& plugin_config)
-    : api_(api) {
+ModbusDeviceFinder::ModbusDeviceFinder(DARTWIC::API::SDK_API* api, const nlohmann::json& plugin_config,
+    std::function<nlohmann::json(const nlohmann::json&)> scanner)
+    : api_(api), scanner_(std::move(scanner)) {
     const auto discovery = plugin_config.value("device_discovery", nlohmann::json::object());
     if (!discovery.value("enabled", true)) return;
     const auto network_scan = discovery.value("network_scan", nlohmann::json::object());
@@ -411,7 +412,7 @@ void ModbusDeviceFinder::probeNetworkEndpoints() {
     int processed = 0;
     while (network_probe_index_ < network_probe_queue_.size() && processed < network_scan_.hosts_per_tick) {
         const auto endpoint = network_probe_queue_[network_probe_index_++];
-        if (tcpPortOpen(endpoint.host, endpoint.port, network_scan_.probe_timeout_ms)) {
+        if (!isEndpointMuted(endpoint) && tcpPortOpen(endpoint.host, endpoint.port, network_scan_.probe_timeout_ms)) {
             addNetworkTarget(endpoint);
         }
         ++processed;
@@ -420,6 +421,42 @@ void ModbusDeviceFinder::probeNetworkEndpoints() {
         network_probe_queue_.clear();
         network_probe_index_ = 0;
     }
+}
+
+void ModbusDeviceFinder::forgetAnnouncement(const std::string& discovery_id) {
+    request_ids_.erase(discovery_id);
+    announced_ids_.erase(std::remove(announced_ids_.begin(), announced_ids_.end(), discovery_id), announced_ids_.end());
+}
+
+bool ModbusDeviceFinder::isDiscoveryMuted(const std::string& discovery_id) {
+    if (api_ == nullptr) return false;
+    try {
+        auto [handle, inserted] = mute_handles_.try_emplace(discovery_id,
+            "device-discovery:" + discovery_id,
+            [this, discovery_id] { forgetAnnouncement(discovery_id); },
+            [this, discovery_id] {
+                forgetAnnouncement(discovery_id);
+                // A muted network endpoint may never have become a Target.
+                // Resume its discovery on unmute without waiting for the rescan interval.
+                network_probe_queue_.clear();
+                network_probe_index_ = 0;
+                next_network_scan_ = {};
+            });
+        return handle->second.refresh(*api_);
+    } catch (...) {
+        // Unknown mute state must not generate a fresh prompt. Retry next tick.
+        return true;
+    }
+}
+
+bool ModbusDeviceFinder::isEndpointMuted(const EndpointProbe& endpoint) {
+    const std::string endpoint_id = endpoint.host + ":" + std::to_string(endpoint.port);
+    if (isDiscoveryMuted(endpoint_id)) return true;
+    const bool scans_units_individually = !targets_.empty() && targets_.front().scan_all_unit_ids;
+    if (!scans_units_individually || network_scan_.unit_ids.empty()) return false;
+    return std::all_of(network_scan_.unit_ids.begin(), network_scan_.unit_ids.end(), [&](const int unit_id) {
+        return isDiscoveryMuted(endpoint_id + ":" + std::to_string(unit_id));
+    });
 }
 
 void ModbusDeviceFinder::reconcileAnnouncements() {
@@ -466,6 +503,12 @@ bool ModbusDeviceFinder::hasConfiguredModule(const Target& target, const int uni
 void ModbusDeviceFinder::tick() {
     std::scoped_lock lock(mutex_);
     if (api_ == nullptr) return;
+    // Observe preferences even for endpoints excluded from the current probe queue.
+    // Callbacks run here on the finder loop, before iterating announcements.
+    for (auto& [id, handle] : mute_handles_) {
+        try { handle.refresh(*api_); }
+        catch (...) { /* Per-endpoint checks below defer work until state is readable. */ }
+    }
     reconcileAnnouncements();
     probeNetworkEndpoints();
     if (targets_.empty()) return;
@@ -476,12 +519,13 @@ void ModbusDeviceFinder::tick() {
         ? endpoint_id + ":" + std::to_string(unit_id)
         : endpoint_id;
     const bool already_configured = hasConfiguredModule(target, unit_id);
+    const bool muted = !already_configured && isDiscoveryMuted(discovery_id);
     const bool already_announced = std::find(
         announced_ids_.begin(), announced_ids_.end(), discovery_id) != announced_ids_.end();
-    if (!already_configured && !already_announced) {
+    if (!muted && !already_configured && !already_announced) {
         nlohmann::json scan;
         try {
-            scan = scanModbusRegisters({
+            scan = scanner_({
                 {"server_ip", target.host},
                 {"server_port", target.port},
                 {"unit_id", unit_id},
@@ -611,6 +655,7 @@ nlohmann::json ModbusDeviceFinder::configureAddressRange(const nlohmann::json& r
     }
     announced_ids_.clear();
     request_ids_.clear();
+    mute_handles_.clear();
     return {
         {"start_address", start_address},
         {"end_address", end_address},
@@ -637,6 +682,8 @@ void ModbusDeviceFinder::announce(const Target& target, int unit_id, const nlohm
         ? endpoint_id + ":" + std::to_string(unit_id)
         : endpoint_id;
     if (std::find(announced_ids_.begin(), announced_ids_.end(), discovery_id) != announced_ids_.end()) return;
+    // The user can mute or provision this endpoint while its register scan runs.
+    if (isDiscoveryMuted(discovery_id) || hasConfiguredModule(target, unit_id)) return;
 
     const std::string instance_name = safeName("modbus_" + target.host + "_" +
         std::to_string(target.port) + "_u" + std::to_string(unit_id));
@@ -749,6 +796,11 @@ void ModbusDeviceFinder::announce(const Target& target, int unit_id, const nlohm
     }, {
         {"request_key", discovery_id},
         {"merge_key", "module-discovery"},
+        {"silenceable", true},
+        {"mute_scope", "engine"},
+        {"notification_id", "modbus_tcp_client:device-discovery:" + discovery_id},
+        // Only the plugin can decide whether a deleted/dismissed device should
+        // be offered again; tick() checks both live configuration and mute state.
         {"reopen_completed", true}
     });
     const std::string request_id = discovery_request.value("request_id", "");

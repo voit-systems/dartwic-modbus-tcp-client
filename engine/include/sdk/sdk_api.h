@@ -618,6 +618,11 @@ namespace DARTWIC::API {
             (void)candidate;
             return nlohmann::json::object();
         }
+
+        virtual bool isNotificationMuted(const std::string& notification_id) {
+            (void)notification_id;
+            return false;
+        }
     };
 }
 

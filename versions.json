@@ -10,5 +10,9 @@
   "1.0.0": {
     "minEngineVersion": "2.0.0-beta.2",
     "minInterfaceVersion": "2.0.0-beta.2"
+  },
+  "1.0.1": {
+    "minEngineVersion": "2.0.0-beta.4",
+    "minInterfaceVersion": "2.0.0-beta.2"
   }
 }

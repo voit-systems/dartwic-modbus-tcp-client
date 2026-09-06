@@ -1,6 +1,8 @@
 #pragma once
 
 #include <sdk/sdk_api.h>
+#include <sdk/notifications/NotificationMuteHandle.h>
+#include "modbus_register_scanner.h"
 
 #include <cstddef>
 #include <chrono>
@@ -13,7 +15,8 @@
 
 class ModbusDeviceFinder {
 public:
-    ModbusDeviceFinder(DARTWIC::API::SDK_API* api, const nlohmann::json& plugin_config);
+    ModbusDeviceFinder(DARTWIC::API::SDK_API* api, const nlohmann::json& plugin_config,
+        std::function<nlohmann::json(const nlohmann::json&)> scanner = scanModbusRegisters);
     void tick();
     nlohmann::json settings() const;
     nlohmann::json configureAddressRange(const nlohmann::json& request);
@@ -55,6 +58,9 @@ private:
     void refreshNetworkProbeQueue();
     void probeNetworkEndpoints();
     void addNetworkTarget(const EndpointProbe& endpoint);
+    bool isDiscoveryMuted(const std::string& discovery_id);
+    bool isEndpointMuted(const EndpointProbe& endpoint);
+    void forgetAnnouncement(const std::string& discovery_id);
 
     DARTWIC::API::SDK_API* api_{};
     std::vector<Target> targets_;
@@ -62,6 +68,8 @@ private:
     std::size_t unit_index_{};
     std::vector<std::string> announced_ids_;
     std::unordered_map<std::string, std::string> request_ids_;
+    std::unordered_map<std::string, DARTWIC::API::NotificationMuteHandle> mute_handles_;
+    std::function<nlohmann::json(const nlohmann::json&)> scanner_;
     NetworkScan network_scan_;
     std::vector<EndpointProbe> network_probe_queue_;
     std::size_t network_probe_index_{};
